@@ -157,21 +157,34 @@ struct ScoreTimelineView: View {
         let safeTitle = score.title.components(separatedBy: CharacterSet.alphanumerics.inverted).joined(separator: "_")
         let fileName = "Score_Week_\(score.week)_\(safeTitle)_Keynote.html"
         
-        let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
-        let fileURL = downloads.appendingPathComponent(fileName)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(html, forType: .string)
         
-        do {
-            try html.write(to: fileURL, atomically: true, encoding: .utf8)
-            
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(html, forType: .string)
-            
+        let possibleDirs = [
+            FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first,
+            FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
+            FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first,
+            URL(fileURLWithPath: NSTemporaryDirectory())
+        ].compactMap { $0 }
+        
+        var exportedURL: URL? = nil
+        for dir in possibleDirs {
+            let targetURL = dir.appendingPathComponent(fileName)
+            do {
+                try html.write(to: targetURL, atomically: true, encoding: .utf8)
+                exportedURL = targetURL
+                break
+            } catch {
+                continue
+            }
+        }
+        
+        if let fileURL = exportedURL {
             NSWorkspace.shared.open(fileURL)
             NSWorkspace.shared.activateFileViewerSelecting([fileURL])
-            
-            store.errorMessage = "✅ Keynote Deck saved to Downloads & opened! (\(fileName))"
-        } catch {
-            store.errorMessage = "Failed to export Keynote deck: \(error.localizedDescription)"
+            store.errorMessage = "✅ Keynote Deck saved & opened! (\(fileURL.lastPathComponent))"
+        } else {
+            store.errorMessage = "✅ Keynote Deck HTML copied to Clipboard! Paste into any text editor or browser."
         }
         #endif
     }
