@@ -53,12 +53,14 @@ struct ScoreTimelineView: View {
                 
                 DatePicker("Class starts", selection: $score.startTime, displayedComponents: .hourAndMinute).labelsHidden()
                     
+                VStack(alignment: .leading, spacing: 12) {
                     HStack(spacing: 12) {
                         Image(systemName: "tablecells.fill.badge.plus")
+                            .foregroundStyle(.cyan)
                         TextField("Google Sheet CSV URL", text: $csvURLString)
                             .textFieldStyle(.roundedBorder)
                         
-                        Button("Import") {
+                        Button("Import CSV") {
                             guard let url = URL(string: csvURLString) else { return }
                             Task {
                                 do {
@@ -70,8 +72,16 @@ struct ScoreTimelineView: View {
                             }
                         }
                         .buttonStyle(.bordered)
+                    }
+                    
+                    HStack(spacing: 12) {
+                        Button("Export Keynote Deck", systemImage: "macwindow.and.cursorarrow") {
+                            exportHTMLSlideshow()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.blue)
                         
-                        Button("Export Clipboard", systemImage: "doc.on.doc") {
+                        Button("Copy CSV", systemImage: "doc.on.doc") {
                             let csv = store.exportToCSV()
                             #if os(macOS)
                             NSPasteboard.general.clearContents()
@@ -79,23 +89,20 @@ struct ScoreTimelineView: View {
                             #else
                             UIPasteboard.general.string = csv
                             #endif
+                            store.errorMessage = "CSV copied to clipboard!"
                         }
                         .buttonStyle(.bordered)
                         
-                        Button("Export Keynote Deck", systemImage: "macwindow.and.cursorarrow") {
-                            exportHTMLSlideshow()
-                        }
-                        .buttonStyle(.borderedProminent)
+                        Spacer()
                         
                         Button("Server Settings", systemImage: "network") {
                             showServerConfig = true
                         }
                         .buttonStyle(.bordered)
                     }
-                    .padding(8)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                    .padding(.top, 4)
-                }.padding(.bottom, 8)
+                }
+                .padding(14)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
 
                 ForEach($score.blocks) { $block in
                     ScoreBlockCard(block: $block, start: store.startTime(for: block.id, in: score), isExpanded: expanded.contains(block.id), toggle: {
@@ -107,6 +114,7 @@ struct ScoreTimelineView: View {
                     }, onExpandProvocation: { slideID in
                         editingProvocationSlideID = slideID
                     })
+                }
             }
             .padding(26)
             .frame(maxWidth: 850)
@@ -147,31 +155,23 @@ struct ScoreTimelineView: View {
         #if os(macOS)
         let html = store.exportToHTML(score: score)
         let safeTitle = score.title.components(separatedBy: CharacterSet.alphanumerics.inverted).joined(separator: "_")
+        let fileName = "Score_Week_\(score.week)_\(safeTitle)_Keynote.html"
         
-        let savePanel = NSSavePanel()
-        savePanel.allowedContentTypes = [.html]
-        savePanel.nameFieldStringValue = "Score_Week_\(score.week)_\(safeTitle)_Keynote.html"
-        savePanel.title = "Export Presentation Deck for Keynote"
-        savePanel.prompt = "Export & Open"
+        let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+        let fileURL = downloads.appendingPathComponent(fileName)
         
-        savePanel.begin { response in
-            if response == .OK, let url = savePanel.url {
-                do {
-                    try html.write(to: url, atomically: true, encoding: .utf8)
-                    NSWorkspace.shared.open(url)
-                } catch {
-                    store.errorMessage = "Failed to export presentation: \(error.localizedDescription)"
-                }
-            } else if response == .cancel {
-                let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
-                let fallbackURL = downloads.appendingPathComponent("Score_Week_\(score.week)_\(safeTitle)_Keynote.html")
-                do {
-                    try html.write(to: fallbackURL, atomically: true, encoding: .utf8)
-                    NSWorkspace.shared.open(fallbackURL)
-                } catch {
-                    store.errorMessage = "Export Error: \(error.localizedDescription)"
-                }
-            }
+        do {
+            try html.write(to: fileURL, atomically: true, encoding: .utf8)
+            
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(html, forType: .string)
+            
+            NSWorkspace.shared.open(fileURL)
+            NSWorkspace.shared.activateFileViewerSelecting([fileURL])
+            
+            store.errorMessage = "✅ Keynote Deck saved to Downloads & opened! (\(fileName))"
+        } catch {
+            store.errorMessage = "Failed to export Keynote deck: \(error.localizedDescription)"
         }
         #endif
     }
