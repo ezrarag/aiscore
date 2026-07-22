@@ -387,6 +387,44 @@ struct StudentLivePresentationView: View {
             }
             #endif
         }
+        .overlay(alignment: .topTrailing) {
+            Menu {
+                Button {
+                    withAnimation(.spring) {
+                        store.roleOverride = (store.currentRole == .instructor) ? .student : .instructor
+                    }
+                } label: {
+                    Label("Act as \(store.currentRole == .instructor ? "Student" : "Instructor")", systemImage: "person.leftright")
+                }
+                
+                if let activeSlide = store.activeSlide, activeSlide.liveQuestion != nil {
+                    Button {
+                        withAnimation(.spring) {
+                            store.showQuestion.toggle()
+                        }
+                    } label: {
+                        Label(store.showQuestion ? "Hide Provocation" : "Show Provocation", systemImage: "questionmark.circle")
+                    }
+                }
+                
+                Button {
+                    withAnimation(.snappy) {
+                        store.isFullscreen.toggle()
+                    }
+                } label: {
+                    Label(store.isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen", systemImage: store.isFullscreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                }
+            } label: {
+                Image(systemName: "gearshape.fill")
+                    .font(.title2)
+                    .foregroundStyle(.cyan)
+                    .padding(8)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .shadow(radius: 2)
+            }
+            .buttonStyle(.plain)
+            .padding(16)
+        }
         .onChange(of: store.activeSlideID) { _, newID in
             handleActiveSlideChange(to: newID)
         }

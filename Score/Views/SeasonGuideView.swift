@@ -158,26 +158,49 @@ struct SeasonGuideView: View {
 
 struct WeekSlidesPreviewSheet: View {
     let score: StudioScore
+    @Environment(ScoreStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @State private var activeSlideIndex = 0
+    @State private var viewMode: ViewMode = .single
+    
+    enum ViewMode: String, CaseIterable { case single = "Slide View", grid = "All Slides Grid" }
     
     var allSlides: [SlideContent] {
         score.blocks.flatMap { $0.slides }
     }
     
     var body: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 16) {
             HStack {
-                VStack(alignment: .leading) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text("Week \(score.week) Slide Deck")
                         .font(.headline)
                     Text(score.title)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                
                 Spacer()
+                
+                Picker("Mode", selection: $viewMode) {
+                    ForEach(ViewMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 200)
+                
+                Button {
+                    if let firstBlock = score.blocks.first, let firstSlide = firstBlock.slides.first {
+                        store.setActive(scoreID: score.id, blockID: firstBlock.id, slideID: firstSlide.id)
+                    }
+                    dismiss()
+                } label: {
+                    Label("Go Live", systemImage: "play.circle.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.green)
+                
                 Button("Done") { dismiss() }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.bordered)
             }
             
             Divider()
@@ -187,66 +210,98 @@ struct WeekSlidesPreviewSheet: View {
                 ContentUnavailableView("No slides in this week", systemImage: "square.slash")
                     .frame(maxHeight: 280)
             } else {
-                VStack(spacing: 16) {
-                    let currentSlide = slides[activeSlideIndex]
-                    VStack(alignment: .leading, spacing: 14) {
-                        Text(currentSlide.title)
-                            .font(.title2.bold())
-                        
-                        if let mediaURL = currentSlide.mediaURL, !mediaURL.isEmpty {
-                            let urls = mediaURL.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                            if !urls.isEmpty {
-                                TabView {
-                                    ForEach(urls, id: \.self) { urlString in
-                                        if let url = resolveURL(urlString) {
-                                            AsyncImage(url: url) { image in
-                                                image.resizable().scaledToFit().clipShape(RoundedRectangle(cornerRadius: 10))
+                if viewMode == .grid {
+                    ScrollView {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 180))], spacing: 14) {
+                            ForEach(Array(slides.enumerated()), id: \.element.id) { idx, slide in
+                                Button {
+                                    activeSlideIndex = idx
+                                    viewMode = .single
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text("Slide \(idx + 1)")
+                                            .font(.caption2.bold())
+                                            .foregroundStyle(.cyan)
+                                        Text(slide.title)
+                                            .font(.caption.bold())
+                                            .lineLimit(2)
+                                            .foregroundStyle(.primary)
+                                        
+                                        if let mediaURL = slide.mediaURL, !mediaURL.isEmpty, let url = resolveURL(mediaURL) {
+                                            CachedAsyncImage(url: url) { image in
+                                                image.resizable().scaledToFill().frame(height: 90).clipShape(RoundedRectangle(cornerRadius: 8))
                                             } placeholder: {
-                                                ProgressView()
+                                                Color.gray.opacity(0.2).frame(height: 90).clipShape(RoundedRectangle(cornerRadius: 8))
                                             }
                                         }
                                     }
+                                    .padding(10)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
                                 }
-                                #if os(iOS)
-                                .tabViewStyle(PageTabViewStyle(indexDisplayMode: .always))
-                                #endif
-                                .frame(height: 200)
+                                .buttonStyle(.plain)
                             }
                         }
-                        
-                        Text(currentSlide.bodyText)
-                            .font(.body)
-                            .foregroundStyle(.secondary)
+                        .padding(.vertical, 4)
                     }
-                    .padding(20)
-                    .frame(maxWidth: .infinity, minHeight: 260, alignment: .leading)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
-                    
-                    HStack {
-                        Button(action: { activeSlideIndex = max(0, activeSlideIndex - 1) }) {
-                            Image(systemName: "chevron.left.circle.fill")
-                                .font(.title)
+                } else {
+                    VStack(spacing: 16) {
+                        let currentSlide = slides[activeSlideIndex]
+                        VStack(alignment: .leading, spacing: 14) {
+                            HStack {
+                                Text(currentSlide.title)
+                                    .font(.title2.bold())
+                                Spacer()
+                                Text("Slide \(activeSlideIndex + 1) of \(slides.count)")
+                                    .font(.caption.bold())
+                                    .foregroundStyle(.cyan)
+                            }
+                            
+                            if let mediaItems = currentSlide.mediaItems, !mediaItems.isEmpty {
+                                MediaCarouselView(items: mediaItems, resolveURL: resolveURL)
+                                    .frame(height: 220)
+                            } else if let mediaURL = currentSlide.mediaURL, !mediaURL.isEmpty, let url = resolveURL(mediaURL) {
+                                CachedAsyncImage(url: url) { image in
+                                    image.resizable().scaledToFit().frame(maxHeight: 220).clipShape(RoundedRectangle(cornerRadius: 10))
+                                } placeholder: {
+                                    ProgressView()
+                                }
+                            }
+                            
+                            Text(currentSlide.bodyText)
+                                .font(.body)
+                                .foregroundStyle(.secondary)
                         }
-                        .disabled(activeSlideIndex == 0)
+                        .padding(20)
+                        .frame(maxWidth: .infinity, minHeight: 260, alignment: .leading)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
                         
-                        Spacer()
-                        
-                        Text("Slide \(activeSlideIndex + 1) of \(slides.count)")
-                            .font(.subheadline.bold())
-                        
-                        Spacer()
-                        
-                        Button(action: { activeSlideIndex = min(slides.count - 1, activeSlideIndex + 1) }) {
-                            Image(systemName: "chevron.right.circle.fill")
-                                .font(.title)
+                        HStack {
+                            Button(action: { activeSlideIndex = max(0, activeSlideIndex - 1) }) {
+                                Image(systemName: "chevron.left.circle.fill")
+                                    .font(.title)
+                            }
+                            .disabled(activeSlideIndex == 0)
+                            
+                            Spacer()
+                            
+                            Text("Slide \(activeSlideIndex + 1) of \(slides.count)")
+                                .font(.subheadline.bold())
+                            
+                            Spacer()
+                            
+                            Button(action: { activeSlideIndex = min(slides.count - 1, activeSlideIndex + 1) }) {
+                                Image(systemName: "chevron.right.circle.fill")
+                                    .font(.title)
+                            }
+                            .disabled(activeSlideIndex == slides.count - 1)
                         }
-                        .disabled(activeSlideIndex == slides.count - 1)
                     }
                 }
             }
         }
         .padding(26)
-        .frame(width: 550, height: 480)
+        .frame(width: 680, height: 540)
     }
     
     private func resolveURL(_ string: String?) -> URL? {

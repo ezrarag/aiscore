@@ -17,10 +17,41 @@ struct ScoreTimelineView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 8) {
-                    TextField("Score title", text: $score.title).font(.largeTitle.bold()).textFieldStyle(.plain)
-                    TextField("Big question", text: $score.bigQuestion, axis: .vertical).font(.title3).textFieldStyle(.plain).foregroundStyle(.secondary)
-                    DatePicker("Class starts", selection: $score.startTime, displayedComponents: .hourAndMinute).labelsHidden()
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        TextField("Score title", text: $score.title).font(.largeTitle.bold()).textFieldStyle(.plain)
+                        TextField("Big question", text: $score.bigQuestion, axis: .vertical).font(.title3).textFieldStyle(.plain).foregroundStyle(.secondary)
+                    }
+                    
+                    Spacer()
+                    
+                    Menu {
+                        Button {
+                            withAnimation(.spring) {
+                                store.roleOverride = (store.currentRole == .instructor) ? .student : .instructor
+                            }
+                        } label: {
+                            Label("Act as \(store.currentRole == .instructor ? "Student" : "Instructor")", systemImage: "person.leftright")
+                        }
+                        
+                        Button {
+                            withAnimation(.snappy) {
+                                store.isFullscreen.toggle()
+                            }
+                        } label: {
+                            Label(store.isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen", systemImage: store.isFullscreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                        }
+                    } label: {
+                        Image(systemName: "gearshape.fill")
+                            .font(.title2)
+                            .foregroundStyle(.cyan)
+                            .padding(8)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                
+                DatePicker("Class starts", selection: $score.startTime, displayedComponents: .hourAndMinute).labelsHidden()
                     
                     HStack(spacing: 12) {
                         Image(systemName: "tablecells.fill.badge.plus")
@@ -51,10 +82,10 @@ struct ScoreTimelineView: View {
                         }
                         .buttonStyle(.bordered)
                         
-                        Button("Export HTML Slideshow", systemImage: "square.and.arrow.up") {
+                        Button("Export Keynote Deck", systemImage: "macwindow.and.cursorarrow") {
                             exportHTMLSlideshow()
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.borderedProminent)
                         
                         Button("Server Settings", systemImage: "network") {
                             showServerConfig = true
@@ -77,9 +108,10 @@ struct ScoreTimelineView: View {
                         editingProvocationSlideID = slideID
                     })
                 }
-            }.padding(26).frame(maxWidth: 850)
-        }
-        .background(.clear)
+            }
+            .padding(26)
+            .frame(maxWidth: 850)
+            .background(.clear)
         .sheet(item: Binding(
             get: { recordingSlideID.map { IdentifiableUUID(id: $0) } },
             set: { recordingSlideID = $0?.id }
@@ -113,21 +145,16 @@ struct ScoreTimelineView: View {
 
     private func exportHTMLSlideshow() {
         #if os(macOS)
-        let savePanel = NSSavePanel()
-        savePanel.allowedContentTypes = [.html]
-        savePanel.nameFieldStringValue = "\(score.title.replacingOccurrences(of: " ", with: "_"))_presentation.html"
-        savePanel.title = "Save HTML Presentation Slide Deck"
-        savePanel.message = "Choose where to save your high-fidelity presentation deck."
+        let desktop = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask)[0]
+        let safeTitle = score.title.components(separatedBy: CharacterSet.alphanumerics.inverted).joined(separator: "_")
+        let fileURL = desktop.appendingPathComponent("Score_Week_\(score.week)_\(safeTitle)_Keynote.html")
+        let html = store.exportToHTML(score: score)
         
-        savePanel.begin { response in
-            if response == .OK, let url = savePanel.url {
-                let html = store.exportToHTML(score: score)
-                do {
-                    try html.write(to: url, atomically: true, encoding: .utf8)
-                } catch {
-                    store.errorMessage = "Failed to write HTML presentation: \(error.localizedDescription)"
-                }
-            }
+        do {
+            try html.write(to: fileURL, atomically: true, encoding: .utf8)
+            NSWorkspace.shared.open(fileURL)
+        } catch {
+            store.errorMessage = "Failed to export Keynote presentation: \(error.localizedDescription)"
         }
         #endif
     }
