@@ -156,6 +156,34 @@ final class ScoreStore {
         Task { await performSync() }
     }
 
+    func nextSlide() {
+        guard let currentScore = scores.first(where: { $0.id == activeScoreID }) ?? scores.first else { return }
+        let allSlides = currentScore.blocks.flatMap { $0.slides }
+        guard !allSlides.isEmpty else { return }
+        if let currentID = activeSlideID, let idx = allSlides.firstIndex(where: { $0.id == currentID }), idx < allSlides.count - 1 {
+            let next = allSlides[idx + 1]
+            if let block = currentScore.blocks.first(where: { $0.slides.contains(where: { $0.id == next.id }) }) {
+                setActive(scoreID: currentScore.id, blockID: block.id, slideID: next.id)
+            }
+        } else if activeSlideID == nil, let first = allSlides.first {
+            if let block = currentScore.blocks.first(where: { $0.slides.contains(where: { $0.id == first.id }) }) {
+                setActive(scoreID: currentScore.id, blockID: block.id, slideID: first.id)
+            }
+        }
+    }
+    
+    func prevSlide() {
+        guard let currentScore = scores.first(where: { $0.id == activeScoreID }) ?? scores.first else { return }
+        let allSlides = currentScore.blocks.flatMap { $0.slides }
+        guard !allSlides.isEmpty else { return }
+        if let currentID = activeSlideID, let idx = allSlides.firstIndex(where: { $0.id == currentID }), idx > 0 {
+            let prev = allSlides[idx - 1]
+            if let block = currentScore.blocks.first(where: { $0.slides.contains(where: { $0.id == prev.id }) }) {
+                setActive(scoreID: currentScore.id, blockID: block.id, slideID: prev.id)
+            }
+        }
+    }
+
     func startSyncLoop() {
         syncTimer?.cancel()
         syncTimer = Task { [weak self] in
