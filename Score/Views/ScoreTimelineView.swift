@@ -107,11 +107,11 @@ struct ScoreTimelineView: View {
                     }, onExpandProvocation: { slideID in
                         editingProvocationSlideID = slideID
                     })
-                }
             }
             .padding(26)
             .frame(maxWidth: 850)
-            .background(.clear)
+        }
+        .background(.clear)
         .sheet(item: Binding(
             get: { recordingSlideID.map { IdentifiableUUID(id: $0) } },
             set: { recordingSlideID = $0?.id }
@@ -145,16 +145,33 @@ struct ScoreTimelineView: View {
 
     private func exportHTMLSlideshow() {
         #if os(macOS)
-        let desktop = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask)[0]
-        let safeTitle = score.title.components(separatedBy: CharacterSet.alphanumerics.inverted).joined(separator: "_")
-        let fileURL = desktop.appendingPathComponent("Score_Week_\(score.week)_\(safeTitle)_Keynote.html")
         let html = store.exportToHTML(score: score)
+        let safeTitle = score.title.components(separatedBy: CharacterSet.alphanumerics.inverted).joined(separator: "_")
         
-        do {
-            try html.write(to: fileURL, atomically: true, encoding: .utf8)
-            NSWorkspace.shared.open(fileURL)
-        } catch {
-            store.errorMessage = "Failed to export Keynote presentation: \(error.localizedDescription)"
+        let savePanel = NSSavePanel()
+        savePanel.allowedContentTypes = [.html]
+        savePanel.nameFieldStringValue = "Score_Week_\(score.week)_\(safeTitle)_Keynote.html"
+        savePanel.title = "Export Presentation Deck for Keynote"
+        savePanel.prompt = "Export & Open"
+        
+        savePanel.begin { response in
+            if response == .OK, let url = savePanel.url {
+                do {
+                    try html.write(to: url, atomically: true, encoding: .utf8)
+                    NSWorkspace.shared.open(url)
+                } catch {
+                    store.errorMessage = "Failed to export presentation: \(error.localizedDescription)"
+                }
+            } else if response == .cancel {
+                let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+                let fallbackURL = downloads.appendingPathComponent("Score_Week_\(score.week)_\(safeTitle)_Keynote.html")
+                do {
+                    try html.write(to: fallbackURL, atomically: true, encoding: .utf8)
+                    NSWorkspace.shared.open(fallbackURL)
+                } catch {
+                    store.errorMessage = "Export Error: \(error.localizedDescription)"
+                }
+            }
         }
         #endif
     }
