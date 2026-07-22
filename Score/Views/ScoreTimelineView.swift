@@ -206,6 +206,12 @@ private struct ScoreBlockCard: View {
                                 onDelete: {
                                     block.slides.remove(at: idx)
                                 },
+                                onDuplicate: {
+                                    var copy = block.slides[idx]
+                                    copy.id = UUID()
+                                    copy.title += " (Copy)"
+                                    block.slides.insert(copy, at: idx + 1)
+                                },
                                 onRecordVideo: {
                                     onRecordVideo(block.slides[idx].id)
                                 },
@@ -217,7 +223,7 @@ private struct ScoreBlockCard: View {
                     }
 
                     Button(action: {
-                        block.slides.append(SlideContent(id: UUID(), title: "New Slide", bodyText: "", mediaType: .none, approvalState: .pending, notes: ""))
+                        block.slides.append(SlideContent(id: UUID(), title: "New Slide", bodyText: "", mediaType: .none, approvalState: .approved, notes: ""))
                     }) {
                         Label("Add Slide", systemImage: "plus.circle")
                     }.buttonStyle(.borderedProminent)
@@ -425,12 +431,24 @@ struct SlideEditorCard: View {
     let onMoveDown: () -> Void
     let onGoLive: () -> Void
     let onDelete: () -> Void
+    let onDuplicate: () -> Void
     let onRecordVideo: () -> Void
     let onExpandProvocation: () -> Void
+    
+    @State private var isCollapsed = false
     
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
+                Button {
+                    withAnimation { isCollapsed.toggle() }
+                } label: {
+                    Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                        .font(.caption.bold())
+                        .foregroundStyle(.cyan)
+                }
+                .buttonStyle(.plain)
+                
                 Image(systemName: "doc.text")
                 Text("Slide \(slide.slideNumberOverride ?? resolvedSlideNumber)").font(.caption.bold()).foregroundStyle(.cyan)
                 
@@ -447,7 +465,7 @@ struct SlideEditorCard: View {
                     .disabled(index == totalSlides - 1)
                     .buttonStyle(.plain)
                 }
-                .padding(.trailing, 8)
+                .padding(.trailing, 4)
                 
                 TextField("Slide Title", text: $slide.title)
                     .font(.headline)
@@ -455,6 +473,13 @@ struct SlideEditorCard: View {
                 
                 Spacer()
                 
+                Button(action: onDuplicate) {
+                    Image(systemName: "square.on.square")
+                        .foregroundStyle(.cyan)
+                }
+                .buttonStyle(.plain)
+                .help("Duplicate Slide")
+
                 Button(action: onGoLive) {
                     Label("Go Live", systemImage: "play.circle.fill")
                         .foregroundStyle(isActive ? .green : .secondary)
@@ -467,91 +492,93 @@ struct SlideEditorCard: View {
                 .buttonStyle(.plain)
             }
             
-            Picker("Slide Type", selection: Binding(
-                get: { slide.slideLabel ?? .content },
-                set: { slide.slideLabel = $0 }
-            )) {
-                ForEach(SlideLabel.allCases) { label in
-                    Text(label.label).tag(label)
-                }
-            }
-            .pickerStyle(.segmented)
-
-            TextField("Content text (markdown supported)", text: $slide.bodyText, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
-                .lineLimit(2...5)
-            
-            TextField("Artwork Attribution (e.g. Artist: Sasha Stiles)", text: Binding(
-                get: { slide.attribution ?? "" },
-                set: { slide.attribution = $0.isEmpty ? nil : $0 }
-            ))
-            .textFieldStyle(.roundedBorder)
-
-            HStack(spacing: 8) {
-                Text("Slide Number Override:").font(.caption).foregroundStyle(.secondary)
-                TextField("Auto (\(resolvedSlideNumber))", value: Binding(
-                    get: { slide.slideNumberOverride },
-                    set: { slide.slideNumberOverride = $0 }
-                ), format: .number)
-                .frame(width: 70)
-                .textFieldStyle(.roundedBorder)
-                
-                if slide.slideNumberOverride != nil {
-                    Button("Reset") {
-                        slide.slideNumberOverride = nil
+            if !isCollapsed {
+                Picker("Slide Type", selection: Binding(
+                    get: { slide.slideLabel ?? .content },
+                    set: { slide.slideLabel = $0 }
+                )) {
+                    ForEach(SlideLabel.allCases) { label in
+                        Text(label.label).tag(label)
                     }
-                    .buttonStyle(.plain)
+                }
+                .pickerStyle(.segmented)
+
+                TextField("Content text (markdown supported)", text: $slide.bodyText, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(2...5)
+                
+                TextField("Artwork Attribution (e.g. Artist: Sasha Stiles)", text: Binding(
+                    get: { slide.attribution ?? "" },
+                    set: { slide.attribution = $0.isEmpty ? nil : $0 }
+                ))
+                .textFieldStyle(.roundedBorder)
+
+                HStack(spacing: 8) {
+                    Text("Slide Number Override:").font(.caption).foregroundStyle(.secondary)
+                    TextField("Auto (\(resolvedSlideNumber))", value: Binding(
+                        get: { slide.slideNumberOverride },
+                        set: { slide.slideNumberOverride = $0 }
+                    ), format: .number)
+                    .frame(width: 70)
+                    .textFieldStyle(.roundedBorder)
+                    
+                    if slide.slideNumberOverride != nil {
+                        Button("Reset") {
+                            slide.slideNumberOverride = nil
+                        }
+                        .buttonStyle(.plain)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                    }
+                }
+
+                mediaItemsSection
+                
+                TextField("Presenter Notes (Notes for Nathaniel)", text: $slide.notes, axis: .vertical)
                     .font(.caption)
-                    .foregroundStyle(.red)
-                }
-            }
+                    .foregroundStyle(.secondary)
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(1...3)
 
-            mediaItemsSection
-            
-            TextField("Presenter Notes (Notes for Nathaniel)", text: $slide.notes, axis: .vertical)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .textFieldStyle(.roundedBorder)
-                .lineLimit(1...3)
-
-            provocationSection
-            
-            VStack(spacing: 8) {
-                HStack {
-                    Text("Approval State:").font(.caption2.bold()).foregroundStyle(.secondary)
-                    Picker("Approval", selection: $slide.approvalState) {
-                        ForEach(ApprovalState.allCases) { Text($0.label).tag($0) }
-                    }.pickerStyle(.segmented)
-                }
+                provocationSection
                 
-                HStack {
-                    Text("Template:").font(.caption2.bold()).foregroundStyle(.secondary)
-                    Picker("Template", selection: Binding(
-                        get: { slide.template ?? .standard },
-                        set: { slide.template = $0 }
-                    )) {
-                        ForEach(SlideTemplate.allCases) { template in
-                            Text(template.label).tag(template)
+                VStack(spacing: 8) {
+                    HStack {
+                        Text("Approval State:").font(.caption2.bold()).foregroundStyle(.secondary)
+                        Picker("Approval", selection: $slide.approvalState) {
+                            ForEach(ApprovalState.allCases) { Text($0.label).tag($0) }
+                        }.pickerStyle(.segmented)
+                    }
+                    
+                    HStack {
+                        Text("Template:").font(.caption2.bold()).foregroundStyle(.secondary)
+                        Picker("Template", selection: Binding(
+                            get: { slide.template ?? .standard },
+                            set: { slide.template = $0 }
+                        )) {
+                            ForEach(SlideTemplate.allCases) { template in
+                                Text(template.label).tag(template)
+                            }
+                        }
+                        
+                        Spacer()
+                        
+                        Text("Layout:").font(.caption2.bold()).foregroundStyle(.secondary)
+                        Picker("Layout", selection: Binding(
+                            get: { slide.layout ?? .standard },
+                            set: { slide.layout = $0 }
+                        )) {
+                            ForEach(SlideLayout.allCases) { layout in
+                                Text(layout.label).tag(layout)
+                            }
                         }
                     }
                     
-                    Spacer()
-                    
-                    Text("Layout:").font(.caption2.bold()).foregroundStyle(.secondary)
-                    Picker("Layout", selection: Binding(
-                        get: { slide.layout ?? .standard },
-                        set: { slide.layout = $0 }
-                    )) {
-                        ForEach(SlideLayout.allCases) { layout in
-                            Text(layout.label).tag(layout)
-                        }
-                    }
+                    Text(layoutHint(for: slide.layout ?? .standard))
+                        .font(.caption2)
+                        .italic()
+                        .foregroundStyle(.cyan)
                 }
-                
-                Text(layoutHint(for: slide.layout ?? .standard))
-                    .font(.caption2)
-                    .italic()
-                    .foregroundStyle(.cyan)
             }
         }
         .padding(10)
@@ -578,43 +605,89 @@ struct SlideEditorCard: View {
     }
     
     private var mediaItemsSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("MEDIA CAROUSEL ITEMS").font(.caption2.bold()).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 10) {
+            Text("MEDIA CAROUSEL & ARTIST CITATIONS").font(.caption2.bold()).foregroundStyle(.secondary)
             
             if let items = slide.mediaItems, !items.isEmpty {
                 ForEach(Array(items.enumerated()), id: \.element.id) { itemIdx, item in
-                    HStack(spacing: 8) {
-                        TextField("Media URL or Local Path", text: Binding(
-                            get: { slide.mediaItems?[itemIdx].url ?? "" },
-                            set: { slide.mediaItems?[itemIdx].url = $0 }
-                        ))
-                        .textFieldStyle(.roundedBorder)
-                        
-                        Picker("Type", selection: Binding(
-                            get: { slide.mediaItems?[itemIdx].type ?? .image },
-                            set: { slide.mediaItems?[itemIdx].type = $0 }
-                        )) {
-                            ForEach(SlideMediaType.allCases.filter { $0 != .none }) { mediaType in
-                                Text(mediaType.label).tag(mediaType)
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 8) {
+                            TextField("Media URL or Local Path", text: Binding(
+                                get: { slide.mediaItems?[itemIdx].url ?? "" },
+                                set: { slide.mediaItems?[itemIdx].url = $0 }
+                            ))
+                            .textFieldStyle(.roundedBorder)
+                            
+                            Picker("Type", selection: Binding(
+                                get: { slide.mediaItems?[itemIdx].type ?? .image },
+                                set: { slide.mediaItems?[itemIdx].type = $0 }
+                            )) {
+                                ForEach(SlideMediaType.allCases.filter { $0 != .none }) { mediaType in
+                                    Text(mediaType.label).tag(mediaType)
+                                }
                             }
-                        }
-                        .pickerStyle(.menu)
-                        .frame(width: 90)
-                        
-                        if slide.mediaItems?[itemIdx].type == .video {
-                            Button(action: onRecordVideo) {
-                                Image(systemName: "video.badge.plus")
+                            .pickerStyle(.menu)
+                            .frame(width: 100)
+                            
+                            Button {
+                                detectLinkInfo(for: itemIdx)
+                            } label: {
+                                Image(systemName: "wand.and.stars")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Auto-Detect Metadata from Link")
+                            
+                            if slide.mediaItems?[itemIdx].type == .video {
+                                Button(action: onRecordVideo) {
+                                    Image(systemName: "video.badge.plus")
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            
+                            Button {
+                                slide.mediaItems?.remove(at: itemIdx)
+                            } label: {
+                                Image(systemName: "minus.circle").foregroundStyle(.red)
                             }
                             .buttonStyle(.plain)
                         }
                         
-                        Button {
-                            slide.mediaItems?.remove(at: itemIdx)
-                        } label: {
-                            Image(systemName: "minus.circle").foregroundStyle(.red)
+                        // Artist Citation & Metadata Fields
+                        HStack(spacing: 6) {
+                            TextField("Artist Name (e.g. Sasha Stiles)", text: Binding(
+                                get: { slide.mediaItems?[itemIdx].artistName ?? "" },
+                                set: { slide.mediaItems?[itemIdx].artistName = $0.isEmpty ? nil : $0 }
+                            ))
+                            .textFieldStyle(.roundedBorder)
+                            .font(.caption)
+                            
+                            TextField("Artwork Title (e.g. Cursive Binary)", text: Binding(
+                                get: { slide.mediaItems?[itemIdx].artworkTitle ?? "" },
+                                set: { slide.mediaItems?[itemIdx].artworkTitle = $0.isEmpty ? nil : $0 }
+                            ))
+                            .textFieldStyle(.roundedBorder)
+                            .font(.caption)
                         }
-                        .buttonStyle(.plain)
+                        
+                        HStack(spacing: 6) {
+                            TextField("Concept / Focus (e.g. poetry across human & machine)", text: Binding(
+                                get: { slide.mediaItems?[itemIdx].caption ?? "" },
+                                set: { slide.mediaItems?[itemIdx].caption = $0.isEmpty ? nil : $0 }
+                            ))
+                            .textFieldStyle(.roundedBorder)
+                            .font(.caption)
+                            
+                            TextField("Source Web Link (e.g. sashastiles.com/...)", text: Binding(
+                                get: { slide.mediaItems?[itemIdx].sourceURL ?? "" },
+                                set: { slide.mediaItems?[itemIdx].sourceURL = $0.isEmpty ? nil : $0 }
+                            ))
+                            .textFieldStyle(.roundedBorder)
+                            .font(.caption)
+                        }
                     }
+                    .padding(8)
+                    .background(Color.black.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
                 }
             }
             
@@ -624,7 +697,7 @@ struct SlideEditorCard: View {
                 }
                 slide.mediaItems?.append(SlideMediaItem(id: UUID(), url: "", type: .image))
             }) {
-                Label("Add Carousel Media Item", systemImage: "plus.circle")
+                Label("Add Carousel Media & Citation", systemImage: "plus.circle")
                     .font(.caption)
             }
             .buttonStyle(.plain)
@@ -632,6 +705,14 @@ struct SlideEditorCard: View {
         }
         .padding(8)
         .background(Color.black.opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
+    }
+    
+    private func detectLinkInfo(for idx: Int) {
+        guard let item = slide.mediaItems?[idx], let url = URL(string: item.url) else { return }
+        let host = url.host()?.replacingOccurrences(of: "www.", with: "") ?? ""
+        if !host.isEmpty && (slide.mediaItems?[idx].sourceURL ?? "").isEmpty {
+            slide.mediaItems?[idx].sourceURL = "https://" + host
+        }
     }
     
     private var provocationSection: some View {

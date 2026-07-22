@@ -926,24 +926,63 @@ struct MediaCarouselView: View {
             ZStack {
                 if items.indices.contains(currentIndex) {
                     let item = items[currentIndex]
-                    if let youtubeEmbed = youtubeEmbedURL(from: item.url) {
-                        NativeWebView(url: youtubeEmbed)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                    } else if let url = resolveURL(item.url) {
-                        if item.type == .webpage || (!item.url.lowercased().hasSuffix(".jpg") && !item.url.lowercased().hasSuffix(".jpeg") && !item.url.lowercased().hasSuffix(".png") && !item.url.lowercased().hasSuffix(".mp4") && !item.url.lowercased().hasSuffix(".mov") && item.url.lowercased().hasPrefix("http")) {
-                            NativeWebView(url: url)
+                    ZStack(alignment: .bottomLeading) {
+                        if let youtubeEmbed = youtubeEmbedURL(from: item.url) {
+                            NativeWebView(url: youtubeEmbed)
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
-                        } else if item.type == .video || item.url.lowercased().hasSuffix(".mp4") || item.url.lowercased().hasSuffix(".mov") {
-                            NativeVideoPlayer(url: url)
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
-                        } else {
-                            AsyncImage(url: url) { image in
-                                image.resizable()
-                                    .scaledToFit()
+                        } else if let url = resolveURL(item.url) {
+                            if item.type == .webpage || (!item.url.lowercased().hasSuffix(".jpg") && !item.url.lowercased().hasSuffix(".jpeg") && !item.url.lowercased().hasSuffix(".png") && !item.url.lowercased().hasSuffix(".mp4") && !item.url.lowercased().hasSuffix(".mov") && item.url.lowercased().hasPrefix("http")) {
+                                NativeWebView(url: url)
                                     .clipShape(RoundedRectangle(cornerRadius: 12))
-                            } placeholder: {
-                                ProgressView()
+                            } else if item.type == .video || item.url.lowercased().hasSuffix(".mp4") || item.url.lowercased().hasSuffix(".mov") {
+                                NativeVideoPlayer(url: url)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                            } else {
+                                AsyncImage(url: url) { image in
+                                    image.resizable()
+                                        .scaledToFit()
+                                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                                } placeholder: {
+                                    ProgressView()
+                                }
                             }
+                        }
+                        
+                        if item.artistName != nil || item.artworkTitle != nil || item.sourceURL != nil {
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack {
+                                    if let artist = item.artistName {
+                                        Text(artist)
+                                            .font(.caption.bold())
+                                            .foregroundStyle(.white)
+                                    }
+                                    if let title = item.artworkTitle {
+                                        Text("— \(title)")
+                                            .font(.caption)
+                                            .italic()
+                                            .foregroundStyle(.cyan)
+                                    }
+                                    Spacer()
+                                    if let src = item.sourceURL, let srcURL = URL(string: src) {
+                                        Link(destination: srcURL) {
+                                            HStack(spacing: 3) {
+                                                Image(systemName: "arrow.up.right.square")
+                                                Text(srcURL.host() ?? "Source")
+                                            }
+                                            .font(.caption2.bold())
+                                            .foregroundStyle(.cyan)
+                                        }
+                                    }
+                                }
+                                if let caption = item.caption {
+                                    Text(caption)
+                                        .font(.caption2)
+                                        .foregroundStyle(.white.opacity(0.85))
+                                }
+                            }
+                            .padding(8)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                            .padding(8)
                         }
                     }
                 }

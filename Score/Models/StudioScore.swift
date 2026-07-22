@@ -70,9 +70,13 @@ enum SlideLabel: String, Codable, CaseIterable, Identifiable {
 }
 
 struct SlideMediaItem: Codable, Identifiable, Hashable {
-    var id: UUID
+    var id: UUID = UUID()
     var url: String
-    var type: SlideMediaType
+    var type: SlideMediaType = .image
+    var artistName: String? = nil
+    var artworkTitle: String? = nil
+    var caption: String? = nil
+    var sourceURL: String? = nil
 }
 
 struct SlideContent: Identifiable, Codable, Hashable {
@@ -486,13 +490,13 @@ extension StudioScore {
                     timeLimit: nil,
                     requiredOutputs: nil,
                     mediaItems: [
-                        SlideMediaItem(id: UUID(), url: "https://static.wixstatic.com/media/39587f_fb9e4ca059ed4b16ad9b2f27911309da~mv2.jpg", type: .image),
-                        SlideMediaItem(id: UUID(), url: "https://d37zoqglehb9o7.cloudfront.net/uploads/2024/08/SerpentineGallery_HHMD03119_B2-2-1780x1001.jpg", type: .image),
-                        SlideMediaItem(id: UUID(), url: "https://d37zoqglehb9o7.cloudfront.net/uploads/2024/08/SerpentineGallery_HHMD03182_B1-640x480.jpg", type: .image),
-                        SlideMediaItem(id: UUID(), url: "https://annaridler.com/content/works/mosaic-2019/block_2/0KH-Muc_Flowers-Forever_IMG_4628.jpg", type: .image),
-                        SlideMediaItem(id: UUID(), url: "https://paglen.studio/wp-content/uploads/2020/06/Paglen-Comet_2017.jpg", type: .image),
-                        SlideMediaItem(id: UUID(), url: "https://refikanadol.com/wp-content/uploads/2021/12/Unsupervised-%E2%80%93-Machine-Hallucination-Moma-x-Refik-Anadol-Studio_Page_10-2400x1350.jpg", type: .image),
-                        SlideMediaItem(id: UUID(), url: "https://www.jakeelwes.com/images/project-zizi19/render.jpeg", type: .image)
+                        SlideMediaItem(id: UUID(), url: "https://static.wixstatic.com/media/39587f_fb9e4ca059ed4b16ad9b2f27911309da~mv2.jpg", type: .image, artistName: "Sasha Stiles", artworkTitle: "Cursive Binary / Technelegy", caption: "poetry across human and machine language", sourceURL: "https://sashastiles.com/cursivebinary"),
+                        SlideMediaItem(id: UUID(), url: "https://d37zoqglehb9o7.cloudfront.net/uploads/2024/08/SerpentineGallery_HHMD03119_B2-2-1780x1001.jpg", type: .image, artistName: "Holly Herndon", artworkTitle: "The Call (with Mat Dryhurst) / Holly+", caption: "voice, machine learning, identity, and collective governance", sourceURL: "https://www.serpentinegalleries.org/whats-on/holly-herndon-mat-dryhurst-the-call/"),
+                        SlideMediaItem(id: UUID(), url: "https://d37zoqglehb9o7.cloudfront.net/uploads/2024/08/SerpentineGallery_HHMD03182_B1-640x480.jpg", type: .image, artistName: "Mat Dryhurst", artworkTitle: "The Call / Holly+ shared projects", caption: "protocols, culture, ownership, and social structures around AI", sourceURL: "https://www.serpentinegalleries.org/whats-on/holly-herndon-mat-dryhurst-the-call/"),
+                        SlideMediaItem(id: UUID(), url: "https://annaridler.com/content/works/mosaic-2019/block_2/0KH-Muc_Flowers-Forever_IMG_4628.jpg", type: .image, artistName: "Anna Ridler", artworkTitle: "Mosaic Virus", caption: "handmade datasets and the labor behind machine-generated images", sourceURL: "https://annaridler.com/works/mosaic-2019"),
+                        SlideMediaItem(id: UUID(), url: "https://paglen.studio/wp-content/uploads/2020/06/Paglen-Comet_2017.jpg", type: .image, artistName: "Trevor Paglen", artworkTitle: "Adversarially Evolved Hallucinations", caption: "machine vision, classification, surveillance, and invisible infrastructures", sourceURL: "https://paglen.studio/2020/04/09/hallucinations/"),
+                        SlideMediaItem(id: UUID(), url: "https://refikanadol.com/wp-content/uploads/2021/12/Unsupervised-%E2%80%93-Machine-Hallucination-Moma-x-Refik-Anadol-Studio_Page_10-2400x1350.jpg", type: .image, artistName: "Refik Anadol", artworkTitle: "Unsupervised", caption: "large-scale data-driven environments and spectacle", sourceURL: "https://refikanadol.com/works/unsupervised/"),
+                        SlideMediaItem(id: UUID(), url: "https://www.jakeelwes.com/images/project-zizi19/render.jpeg", type: .image, artistName: "Jake Elwes", artworkTitle: "The Zizi Project", caption: "gender, performance, bias, and queer approaches to AI systems", sourceURL: "https://www.jakeelwes.com/project-zizi-2019.html")
                     ],
                     slideNumberOverride: 11
                 ),
