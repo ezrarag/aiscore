@@ -1102,8 +1102,10 @@ final class ScoreStore {
         let snapshot = scores
         saveTask?.cancel()
         saveTask = Task { [persistence] in
-            try? await Task.sleep(for: .milliseconds(250))
-            persistence.save(snapshot, to: "scores.json")
+            try? await Task.sleep(for: .milliseconds(600))
+            if !Task.isCancelled {
+                persistence.save(snapshot, to: "scores.json")
+            }
         }
     }
     private func saveAccount() {

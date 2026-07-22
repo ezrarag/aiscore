@@ -22,9 +22,12 @@ struct PersistenceService: Sendable {
         }
     }
 
-    func save<T: Encodable>(_ value: T, to name: String) {
-        guard let data = try? JSONEncoder.score.encode(value) else { return }
-        try? data.write(to: directory.appendingPathComponent(name), options: .atomic)
+    func save<T: Encodable & Sendable>(_ value: T, to name: String) {
+        let targetURL = directory.appendingPathComponent(name)
+        DispatchQueue.global(qos: .utility).async {
+            guard let data = try? JSONEncoder.score.encode(value) else { return }
+            try? data.write(to: targetURL, options: .atomic)
+        }
     }
 
     func remove(_ name: String) {

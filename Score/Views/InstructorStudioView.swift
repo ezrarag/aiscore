@@ -18,15 +18,16 @@ enum SidebarItem: Hashable, Identifiable {
 
 struct InstructorStudioView: View {
     @Environment(ScoreStore.self) private var store
-    @State private var selectedSidebarItem: SidebarItem? = .philosophy
+    @State private var selectedSidebarItem: SidebarItem? = nil
     @State private var inspector: InspectorTab = .copilot
-    @State private var showInspector = true
+    @State private var showInspector = false
+    @State private var columnVisibility: NavigationSplitViewVisibility = .detailOnly
 
     enum InspectorTab: String, CaseIterable { case copilot = "AI", stage = "Stage", pulse = "Pulse", terminal = "Terminal" }
 
     var body: some View {
         @Bindable var store = store
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             List(selection: $selectedSidebarItem) {
                 Section("Overview") {
                     NavigationLink(value: SidebarItem.philosophy) {
@@ -90,6 +91,11 @@ struct InstructorStudioView: View {
                         Button("Inspector", systemImage: "sidebar.trailing") { showInspector.toggle() }
                     }
                     Button("Log out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) { store.signOut() }
+                }
+            }
+            .onAppear {
+                if selectedSidebarItem == nil, let firstWeek = store.scores.first {
+                    selectedSidebarItem = .week(firstWeek.id)
                 }
             }
         }

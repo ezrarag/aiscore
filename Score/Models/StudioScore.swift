@@ -31,7 +31,7 @@ enum ApprovalState: String, Codable, CaseIterable, Identifiable {
 }
 
 enum SlideMediaType: String, Codable, CaseIterable, Identifiable {
-    case none, image, video
+    case none, image, video, webpage
     var id: Self { self }
     var label: String { rawValue.capitalized }
 }
@@ -314,7 +314,27 @@ extension StudioScore {
                 SlideContent(id: UUID(), title: "Walk-in", bodyText: "Play Sasha Stiles video as students arrive.", mediaType: .video, mediaURL: "https://example.com/sasha-stiles.mp4", approvalState: .approved, notes: "Ensure audio levels are warm and unhurried.")
             ]),
             ScoreBlock(id: UUID(), minutes: 25, phase: .wonder, thinkingWith: "each other", why: "Make assumptions visible before explaining.", mode: .walk, medium: "Prompt cards", cue: "Pair up. Find a question that makes your partner pause.", atmosphere: "Mobile and speculative", slides: [
-                SlideContent(id: UUID(), title: "Cursive Binary", bodyText: "Full-screen image only.", mediaType: .image, mediaURL: "https://example.com/cursive-binary.jpg", approvalState: .approved, notes: "Ask:\n- What do you see?\n- What is this?\n- Is it handwriting? Code? Poetry?\n- Why might someone merge these languages?\nSpend 3–5 minutes in discussion before explaining anything. Artist: Sasha Stiles"),
+                SlideContent(
+                    id: UUID(),
+                    title: "Slide 3 — Cursive Binary: Portrait of the Poet",
+                    bodyText: "What do you see?\nIs it handwriting? Code? Poetry?\nWhy might an artist merge binary notation with human cursive?",
+                    mediaType: .webpage,
+                    mediaURL: "https://www.lerandom.art/collection/cursive-binary-variation-1-portrait-of-the-poet-in-the-process-of-becoming",
+                    approvalState: .approved,
+                    notes: "METHOD 1: Think-Pair-Share (30s timer)\nLet them turn to a neighbor for 30s to debate it.\n\nMETHOD 2: Candidate List (Whiteboard Cheat Sheet)\nGuide students to call out candidates: Sasha Stiles, The hand, The poem, The visual form, Binary notation, The reader, The technology.",
+                    template: .standard,
+                    liveQuestion: "Think-Pair-Share (30s): Is this handwriting, code, or poetry? Why merge binary and cursive?",
+                    liveQuestionDuration: 30,
+                    slideLabel: .discuss,
+                    attribution: "Artist: Sasha Stiles",
+                    timeLimit: 3,
+                    requiredOutputs: "Candidates: Sasha Stiles • The hand • The poem • The visual form • Binary notation • The reader • The technology",
+                    mediaItems: [
+                        SlideMediaItem(id: UUID(), url: "https://www.lerandom.art/collection/cursive-binary-variation-1-portrait-of-the-poet-in-the-process-of-becoming", type: .webpage)
+                    ],
+                    slideNumberOverride: 3,
+                    layout: .questionStack
+                ),
                 SlideContent(
                     id: UUID(),
                     title: "Slide 4 — Language ➔ Images ➔ Memory ➔ Futures",

@@ -930,7 +930,10 @@ struct MediaCarouselView: View {
                         NativeWebView(url: youtubeEmbed)
                             .clipShape(RoundedRectangle(cornerRadius: 12))
                     } else if let url = resolveURL(item.url) {
-                        if item.type == .video || item.url.lowercased().hasSuffix(".mp4") || item.url.lowercased().hasSuffix(".mov") {
+                        if item.type == .webpage || (!item.url.lowercased().hasSuffix(".jpg") && !item.url.lowercased().hasSuffix(".jpeg") && !item.url.lowercased().hasSuffix(".png") && !item.url.lowercased().hasSuffix(".mp4") && !item.url.lowercased().hasSuffix(".mov") && item.url.lowercased().hasPrefix("http")) {
+                            NativeWebView(url: url)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                        } else if item.type == .video || item.url.lowercased().hasSuffix(".mp4") || item.url.lowercased().hasSuffix(".mov") {
                             NativeVideoPlayer(url: url)
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
                         } else {
@@ -1007,7 +1010,9 @@ struct FullscreenMediaBackgroundView: View {
                 if let youtubeEmbed = youtubeEmbedURL(from: item.url) {
                     NativeWebView(url: youtubeEmbed)
                 } else if let url = resolveURL(item.url) {
-                    if item.type == .video || item.url.lowercased().hasSuffix(".mp4") || item.url.lowercased().hasSuffix(".mov") {
+                    if item.type == .webpage || (!item.url.lowercased().hasSuffix(".jpg") && !item.url.lowercased().hasSuffix(".jpeg") && !item.url.lowercased().hasSuffix(".png") && !item.url.lowercased().hasSuffix(".mp4") && !item.url.lowercased().hasSuffix(".mov") && item.url.lowercased().hasPrefix("http")) {
+                        NativeWebView(url: url)
+                    } else if item.type == .video || item.url.lowercased().hasSuffix(".mp4") || item.url.lowercased().hasSuffix(".mov") {
                         NativeVideoPlayer(url: url)
                     } else {
                         AsyncImage(url: url) { image in
@@ -1086,18 +1091,63 @@ struct NativeWebView: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.allowsAirPlayForMediaPlayback = true
+        configuration.mediaTypesRequiringUserActionForPlayback = []
+        
         let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
         webView.setValue(false, forKey: "drawsBackground") // Transparent background
-        let request = URLRequest(url: url)
-        webView.load(request)
+        
+        loadContent(in: webView)
         return webView
     }
     
     func updateNSView(_ nsView: WKWebView, context: Context) {
-        if nsView.url != url {
-            let request = URLRequest(url: url)
-            nsView.load(request)
+        if let currentURL = nsView.url, currentURL.absoluteString == url.absoluteString {
+            return
         }
+        loadContent(in: nsView)
+    }
+    
+    private func loadContent(in webView: WKWebView) {
+        if let youtubeID = extractYouTubeID(from: url) {
+            let html = """
+            <!DOCTYPE html>
+            <html>
+            <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+            <style>
+              * { box-sizing: border-box; }
+              body { margin: 0; padding: 0; background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; width: 100vw; overflow: hidden; }
+              iframe { width: 100%; height: 100%; border: none; }
+            </style>
+            </head>
+            <body>
+              <iframe src="https://www.youtube.com/embed/\(youtubeID)?autoplay=1&mute=0&controls=1&enablejsapi=1&origin=https://www.youtube.com" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+            </body>
+            </html>
+            """
+            webView.loadHTMLString(html, baseURL: URL(string: "https://www.youtube.com"))
+        } else {
+            let request = URLRequest(url: url)
+            webView.load(request)
+        }
+    }
+    
+    private func extractYouTubeID(from url: URL) -> String? {
+        let host = url.host() ?? ""
+        if host.contains("youtube.com") {
+            if url.pathComponents.contains("embed"), let last = url.pathComponents.last {
+                return last
+            }
+            if let components = URLComponents(url: url, resolvingAgainstBaseURL: true),
+               let queryItems = components.queryItems,
+               let videoID = queryItems.first(where: { $0.name == "v" })?.value {
+                return videoID
+            }
+        } else if host.contains("youtu.be") {
+            return url.lastPathComponent
+        }
+        return nil
     }
 }
 
