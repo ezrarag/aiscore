@@ -12,6 +12,7 @@ struct ScoreTimelineView: View {
     @State private var generatingImageForSlideID: UUID? = nil
     @State private var csvURLString = ""
     @State private var showServerConfig = false
+    @State private var showKeynoteThemePicker = false
     @State private var editingProvocationSlideID: UUID? = nil
 
     var body: some View {
@@ -76,7 +77,7 @@ struct ScoreTimelineView: View {
                     
                     HStack(spacing: 10) {
                         Button("Open in Keynote App", systemImage: "play.desktopcomputer") {
-                            Task { await store.createLiveKeynote() }
+                            showKeynoteThemePicker = true
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(.purple)
@@ -158,6 +159,9 @@ struct ScoreTimelineView: View {
             set: { editingProvocationSlideID = $0?.id }
         )) { wrapper in
             ProvocationWorkspaceSheet(slideID: wrapper.id)
+        }
+        .sheet(isPresented: $showKeynoteThemePicker) {
+            KeynoteThemePickerSheet()
         }
     }
 
@@ -918,6 +922,109 @@ struct ProvocationWorkspaceSheet: View {
             }
         }
         return nil
+    }
+}
+
+struct KeynoteThemePickerSheet: View {
+    @Environment(ScoreStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    
+    @State private var selectedTheme: String = "Black"
+    @State private var customThemeName: String = ""
+    @State private var isGenerating = false
+    
+    let presets = [
+        ("Black", "🖤 Dark Studio", "Sleek dark background with white typography"),
+        ("Editorial", "📄 Editorial Serif", "Serif typography for literary and design presentations"),
+        ("Minimalist", "🎨 Minimalist", "Clean fine-line layout with subtle accents"),
+        ("Bold", "⚡️ High Contrast Bold", "Vibrant colors for high engagement"),
+        ("White", "🤍 Standard White", "Classic clean white presentation template")
+    ]
+    
+    var body: some View {
+        VStack(spacing: 20) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Select Keynote Theme")
+                        .font(.headline)
+                    Text("Choose a built-in or custom theme template for Apple Keynote.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .buttonStyle(.bordered)
+            }
+            
+            Divider()
+            
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Popular Keynote Themes")
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+                
+                ForEach(presets, id: \.0) { key, label, desc in
+                    Button {
+                        selectedTheme = key
+                        customThemeName = ""
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(label)
+                                    .font(.body.bold())
+                                    .foregroundStyle(.primary)
+                                Text(desc)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if selectedTheme == key && customThemeName.isEmpty {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(.purple)
+                                    .font(.title3)
+                            }
+                        }
+                        .padding(12)
+                        .background(selectedTheme == key && customThemeName.isEmpty ? Color.purple.opacity(0.12) : Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+                    }
+                    .buttonStyle(.plain)
+                }
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Custom / Premium Theme Name")
+                        .font(.caption2.bold())
+                        .foregroundStyle(.secondary)
+                    TextField("e.g. MyCustomTheme.kth", text: $customThemeName)
+                        .textFieldStyle(.roundedBorder)
+                }
+                .padding(.top, 4)
+            }
+            
+            Divider()
+            
+            HStack {
+                Spacer()
+                Button {
+                    isGenerating = true
+                    let themeToUse = customThemeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? selectedTheme : customThemeName.trimmingCharacters(in: .whitespacesAndNewlines)
+                    Task {
+                        await store.createLiveKeynote(themeName: themeToUse)
+                        isGenerating = false
+                        dismiss()
+                    }
+                } label: {
+                    if isGenerating {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("Generate Presentation in Keynote", systemImage: "play.desktopcomputer")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.purple)
+            }
+        }
+        .padding(24)
+        .frame(width: 480)
     }
 }
 
