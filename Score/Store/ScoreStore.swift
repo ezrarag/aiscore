@@ -677,7 +677,7 @@ final class ScoreStore {
 
     // MARK: - Keynote Direct Automation & Two-Way Sync
     @MainActor
-    func createLiveKeynote(themeName: String = "Black") async {
+    func createLiveKeynote(themeName: String = "Basic Black") async {
         guard let score = scores.first(where: { $0.id == activeScoreID }) ?? scores.first else { return }
         
         #if os(macOS)
@@ -685,21 +685,7 @@ final class ScoreStore {
         if success {
             self.errorMessage = "✅ Presentation created live in Apple Keynote!"
         } else {
-            // Fallback: Export high-fidelity Keynote presentation deck to Downloads & open Keynote automatically
-            let html = exportToHTML(score: score)
-            let safeTitle = score.title.components(separatedBy: CharacterSet.alphanumerics.inverted).joined(separator: "_")
-            let fileName = "Score_Week_\(score.week)_\(safeTitle)_Keynote.html"
-            let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
-            let fileURL = downloads.appendingPathComponent(fileName)
-            
-            do {
-                try html.write(to: fileURL, atomically: true, encoding: .utf8)
-                NSWorkspace.shared.open(fileURL)
-                NSWorkspace.shared.activateFileViewerSelecting([fileURL])
-                self.errorMessage = "✅ Keynote Deck exported to Downloads & opened!"
-            } catch {
-                self.errorMessage = "⚠️ Could not generate Keynote presentation: \(error.localizedDescription)"
-            }
+            self.errorMessage = "⚠️ Could not launch Keynote. Please ensure Keynote is installed."
         }
         #endif
     }
@@ -1306,18 +1292,14 @@ final class KeynoteSyncService: ObservableObject {
     
     private init() {}
     
-    private var appName: String {
-        let apps = NSWorkspace.shared.runningApplications
-        if apps.contains(where: { $0.localizedName == "Keynote Creator Studio" }) {
-            return "Keynote Creator Studio"
-        }
-        return "Keynote"
+    private var targetAppNames: [String] {
+        return ["Keynote Creator Studio", "Keynote"]
     }
     
     func checkKeynoteStatus() -> Bool {
         #if os(macOS)
         let apps = NSWorkspace.shared.runningApplications
-        let running = apps.contains { $0.bundleIdentifier == "com.apple.iWork.Keynote" || $0.localizedName == "Keynote Creator Studio" || $0.localizedName == "Keynote" }
+        let running = apps.contains { $0.bundleIdentifier == "com.apple.iWork.Keynote" || targetAppNames.contains($0.localizedName ?? "") }
         self.isKeynoteRunning = running
         return running
         #else
@@ -1328,82 +1310,86 @@ final class KeynoteSyncService: ObservableObject {
     func createPresentationInKeynote(score: StudioScore, themeName: String = "Basic Black") async -> Bool {
         #if os(macOS)
         let cleanTheme = themeName.replacingOccurrences(of: "\"", with: "")
-        let targetApp = appName
         
-        var scriptSource = """
-        tell application "\(targetApp)"
-            activate
-            set doc to missing value
-            try
-                set doc to make new document with properties {document theme:theme "\(cleanTheme)"}
-            on error
+        for appName in targetAppNames {
+            var scriptSource = """
+            tell application "\(appName)"
+                activate
+                set doc to missing value
                 try
-                    set doc to make new document
-                end try
-            end try
-            
-            if doc is not missing value then
-                tell doc
+                    set doc to make new document with properties {document theme:theme "\(cleanTheme)"}
+                on error
                     try
-                        delete slide 1
+                        set doc to make new document
                     end try
-        """
-        
-        for block in score.blocks {
-            for slide in block.slides {
-                let cleanTitle = escapeAppleScriptString(slide.title)
-                let cleanBody = escapeAppleScriptString(slide.bodyText)
-                let cleanNotes = escapeAppleScriptString(slide.notes)
-                let question = escapeAppleScriptString(slide.liveQuestion ?? "")
-                
-                var fullNotes = cleanNotes
-                if !question.isEmpty {
-                    fullNotes += "\\n\\n[LIVE PROVOCATION]: " + question
-                }
-                
-                scriptSource += """
-                
-                set currentSlide to missing value
-                try
-                    set currentSlide to make new slide at end of slides
                 end try
                 
-                if currentSlide is not missing value then
-                    tell currentSlide
+                if doc is not missing value then
+                    tell doc
                         try
-                            set presenter notes to "\(fullNotes)"
+                            delete slide 1
                         end try
-                        try
-                            set textList to object text of every text item
-                            if (count of textList) > 0 then
-                                set object text of text item 1 to "\(cleanTitle)"
-                            end if
-                            if (count of textList) > 1 then
-                                set object text of text item 2 to "\(cleanBody)"
-                            end if
-                        on error
+            """
+            
+            for block in score.blocks {
+                for slide in block.slides {
+                    let cleanTitle = escapeAppleScriptString(slide.title)
+                    let cleanBody = escapeAppleScriptString(slide.bodyText)
+                    let cleanNotes = escapeAppleScriptString(slide.notes)
+                    let question = escapeAppleScriptString(slide.liveQuestion ?? "")
+                    
+                    var fullNotes = cleanNotes
+                    if !question.isEmpty {
+                        fullNotes += "\\n\\n[LIVE PROVOCATION]: " + question
+                    }
+                    
+                    scriptSource += """
+                    
+                    set currentSlide to missing value
+                    try
+                        set currentSlide to make new slide at end of slides
+                    end try
+                    
+                    if currentSlide is not missing value then
+                        tell currentSlide
                             try
-                                set title to "\(cleanTitle)"
+                                set presenter notes to "\(fullNotes)"
                             end try
                             try
-                                set body to "\(cleanBody)"
+                                set textList to object text of every text item
+                                if (count of textList) > 0 then
+                                    set object text of text item 1 to "\(cleanTitle)"
+                                end if
+                                if (count of textList) > 1 then
+                                    set object text of text item 2 to "\(cleanBody)"
+                                end if
+                            on error
+                                try
+                                    set title to "\(cleanTitle)"
+                                end try
+                                try
+                                    set body to "\(cleanBody)"
+                                end try
                             end try
-                        end try
+                        end tell
+                    end if
+                    """
+                }
+            }
+            
+            scriptSource += """
                     end tell
+                    return true
                 end if
-                """
+                return false
+            end tell
+            """
+            
+            if executeAppleScript(scriptSource) {
+                return true
             }
         }
-        
-        scriptSource += """
-                end tell
-                return true
-            end if
-            return false
-        end tell
-        """
-        
-        return executeAppleScript(scriptSource)
+        return false
         #else
         return false
         #endif
@@ -1411,19 +1397,20 @@ final class KeynoteSyncService: ObservableObject {
     
     func jumpToSlideInKeynote(slideIndex: Int) {
         #if os(macOS)
-        let targetApp = appName
-        let script = """
-        tell application "\(targetApp)"
-            if (count of documents) > 0 then
-                tell front document
-                    if slideIndex <= (count of slides) then
-                        show slide \(slideIndex + 1)
-                    end if
-                end tell
-            end if
-        end tell
-        """
-        _ = executeAppleScript(script)
+        for appName in targetAppNames {
+            let script = """
+            tell application "\(appName)"
+                if (count of documents) > 0 then
+                    tell front document
+                        if slideIndex <= (count of slides) then
+                            show slide \(slideIndex + 1)
+                        end if
+                    end tell
+                end if
+            end tell
+            """
+            if executeAppleScript(script) { break }
+        }
         #endif
     }
     
@@ -1436,50 +1423,54 @@ final class KeynoteSyncService: ObservableObject {
     
     func pullSlidesFromKeynote() -> [KeynoteSlideData] {
         #if os(macOS)
-        let targetApp = appName
-        let script = """
-        tell application "\(targetApp)"
-            if (count of documents) is 0 then return ""
-            set slideData to ""
-            tell front document
-                repeat with i from 1 to count of slides
-                    set s to slide i
-                    set t to ""
-                    set b to ""
-                    set n to ""
-                    
-                    try
-                        set n to presenter notes of s
-                    end try
-                    
-                    try
-                        set textList to object text of every text item of s
-                        if (count of textList) > 0 then
-                            set t to item 1 of textList
-                        end if
-                        if (count of textList) > 1 then
-                            set b to item 2 of textList
-                        end if
-                    end try
-                    
-                    set slideData to slideData & i & "|||" & t & "|||" & b & "|||" & n & "<<<SLIDE_BREAK>>>"
-                end repeat
+        for appName in targetAppNames {
+            let script = """
+            tell application "\(appName)"
+                if (count of documents) is 0 then return ""
+                set slideData to ""
+                tell front document
+                    repeat with i from 1 to count of slides
+                        set s to slide i
+                        set t to ""
+                        set b to ""
+                        set n to ""
+                        
+                        try
+                            set n to presenter notes of s
+                        end try
+                        
+                        try
+                            set textList to object text of every text item of s
+                            if (count of textList) > 0 then
+                                set t to item 1 of textList
+                            end if
+                            if (count of textList) > 1 then
+                                set b to item 2 of textList
+                            end if
+                        end try
+                        
+                        set slideData to slideData & i & "|||" & t & "|||" & b & "|||" & n & "<<<SLIDE_BREAK>>>"
+                    end repeat
+                end tell
+                return slideData
             end tell
-            return slideData
-        end tell
-        """
-        
-        guard let output = executeAppleScriptWithOutput(script), !output.isEmpty else { return [] }
-        var result: [KeynoteSlideData] = []
-        
-        let slideBlocks = output.components(separatedBy: "<<<SLIDE_BREAK>>>")
-        for blockStr in slideBlocks where !blockStr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let parts = blockStr.components(separatedBy: "|||")
-            if parts.count >= 4, let idx = Int(parts[0]) {
-                result.append(KeynoteSlideData(index: idx, title: parts[1], body: parts[2], notes: parts[3]))
+            """
+            
+            if let output = executeAppleScriptWithOutput(script), !output.isEmpty {
+                var result: [KeynoteSlideData] = []
+                let slideBlocks = output.components(separatedBy: "<<<SLIDE_BREAK>>>")
+                for blockStr in slideBlocks where !blockStr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    let parts = blockStr.components(separatedBy: "|||")
+                    if parts.count >= 4, let idx = Int(parts[0]) {
+                        result.append(KeynoteSlideData(index: idx, title: parts[1], body: parts[2], notes: parts[3]))
+                    }
+                }
+                if !result.isEmpty {
+                    return result
+                }
             }
         }
-        return result
+        return []
         #else
         return []
         #endif
