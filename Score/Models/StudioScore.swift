@@ -77,6 +77,12 @@ struct SlideMediaItem: Codable, Identifiable, Hashable {
     var artworkTitle: String? = nil
     var caption: String? = nil
     var sourceURL: String? = nil
+    var keynoteX: Int? = nil
+    var keynoteY: Int? = nil
+    var keynoteWidth: Int? = nil
+    var keynoteHeight: Int? = nil
+    var keynoteRotation: Int? = nil
+    var keynoteOpacity: Int? = nil
 }
 
 struct SlideContent: Identifiable, Codable, Hashable {
@@ -583,4 +589,3 @@ extension StudioScore {
         ])
     }
 }
-

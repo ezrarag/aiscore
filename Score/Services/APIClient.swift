@@ -10,8 +10,47 @@ struct SyncState: Codable, Sendable {
 }
 
 struct APIClient: Sendable {
+    struct Health: Decodable, Sendable {
+        struct ProviderStatus: Decodable, Sendable {
+            let keyLoaded: Bool
+            let textModel: String?
+            let imageModel: String?
+            let imageGeneration: Bool
+        }
+        let ok: Bool
+        let ai: Bool
+        let activeProvider: String?
+        let primaryProvider: String?
+        let fallbackOrder: [String]?
+        let providers: [String: ProviderStatus]?
+    }
+    enum ClientError: LocalizedError {
+        case server(String)
+        var errorDescription: String? {
+            switch self { case .server(let message): return message }
+        }
+    }
+    struct GeneratedSlide: Decodable, Sendable {
+        let title: String
+        let body: String
+        let notes: String
+    }
     let baseURL: URL
     var token: String?
+
+    func health() async throws -> Health {
+        var request = URLRequest(url: baseURL.appendingPathComponent("/health"))
+        request.timeoutInterval = 3
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
+            if let payload = try? JSONDecoder().decode([String: String].self, from: data),
+               let message = payload["error"] {
+                throw ClientError.server(message)
+            }
+            throw URLError(.badServerResponse)
+        }
+        return try JSONDecoder().decode(Health.self, from: data)
+    }
 
     func signIn(name: String, email: String, role: AccountRole) async throws -> Account {
         try await request("/auth/demo", body: ["name": name, "email": email, "role": role.rawValue])
@@ -30,11 +69,22 @@ struct APIClient: Sendable {
         return reply.url
     }
 
+    func generateSlides(prompt: String, score: StudioScore?) async throws -> [GeneratedSlide] {
+        struct Body: Encodable { let prompt: String; let score: StudioScore? }
+        struct Reply: Decodable { let slides: [GeneratedSlide] }
+        let reply: Reply = try await request("/ai/slides", body: Body(prompt: prompt, score: score))
+        return reply.slides
+    }
+
     func getSync() async throws -> SyncState {
         var request = URLRequest(url: baseURL.appendingPathComponent("/score/sync"))
         request.httpMethod = "GET"
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
+            if let payload = try? JSONDecoder().decode([String: String].self, from: data),
+               let message = payload["error"] {
+                throw ClientError.server(message)
+            }
             throw URLError(.badServerResponse)
         }
         let decoder = JSONDecoder()
@@ -66,9 +116,13 @@ struct APIClient: Sendable {
         
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
+            if let payload = try? JSONDecoder().decode([String: String].self, from: data),
+               let message = payload["error"] {
+                throw ClientError.server(message)
+            }
             throw URLError(.badServerResponse)
         }
-        
+
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return try decoder.decode(Output.self, from: data)

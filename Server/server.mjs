@@ -1,10 +1,12 @@
 import http from "node:http";
 import crypto from "node:crypto";
+import { loadLLMConfig } from "./llm/config.mjs";
+import { createLLMRouter } from "./llm/router.mjs";
 
 const port = Number(process.env.PORT || 8787);
-const openAIKey = process.env.OPENAI_API_KEY;
 const allowedOrigin = process.env.ALLOWED_ORIGIN || "*";
 const generatedMedia = new Map();
+const llm = createLLMRouter(loadLLMConfig());
 let activeState = {
   activeScoreID: null,
   activeBlockID: null,
@@ -27,25 +29,19 @@ async function readJSON(req) {
   return JSON.parse(data.toString("utf8") || "{}");
 }
 
-async function openAI(path, body) {
-  if (!openAIKey) throw new Error("OPENAI_API_KEY is not configured on the Score server");
-  const response = await fetch(`https://api.openai.com/v1${path}`, {
-    method: "POST",
-    headers: { "authorization": `Bearer ${openAIKey}`, "content-type": "application/json" },
-    body: JSON.stringify(body)
-  });
-  const payload = await response.json();
-  if (!response.ok) throw new Error(payload?.error?.message || `OpenAI returned ${response.status}`);
-  return payload;
-}
-
-function outputText(response) {
-  return (response.output || []).flatMap(item => item.content || []).filter(item => item.type === "output_text").map(item => item.text).join("\n");
-}
+const slideSchema = {
+  type: "object",
+  properties: { slides: { type: "array", minItems: 1, maxItems: 60, items: {
+    type: "object",
+    properties: { title: { type: "string" }, body: { type: "string" }, notes: { type: "string" } },
+    required: ["title", "body", "notes"], additionalProperties: false
+  } } },
+  required: ["slides"], additionalProperties: false
+};
 
 const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") return json(res, 204, {});
-  if (req.method === "GET" && req.url === "/health") return json(res, 200, { ok: true, ai: Boolean(openAIKey) });
+  if (req.method === "GET" && req.url === "/health") return json(res, 200, { ok: true, ...llm.health() });
   if (req.method === "GET" && req.url?.startsWith("/media/")) {
     const item = generatedMedia.get(req.url.slice(7));
     if (!item) return json(res, 404, { error: "Media expired" });
@@ -76,34 +72,41 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/ai/respond") {
       const body = await readJSON(req);
       const scoreContext = body.score ? `\nCurrent studio score JSON:\n${JSON.stringify(body.score)}` : "";
-      const response = await openAI("/responses", {
-        model: process.env.OPENAI_TEXT_MODEL || "gpt-5.4-mini",
-        instructions: "You are Score, a concise but provocative studio-seminar teaching collaborator. Help instructors shape rhythm, questions, critique, and making. Never flatten uncertainty into generic lesson-plan language.",
-        input: `${body.prompt}${scoreContext}`
+      const response = await llm.generateText({
+        system: "You are Score, a concise but provocative studio-seminar teaching collaborator. Help instructors shape rhythm, questions, critique, and making. Never flatten uncertainty into generic lesson-plan language.",
+        messages: [{ role: "user", content: `${body.prompt}${scoreContext}` }]
       });
-      return json(res, 200, { text: outputText(response) || "The model returned no text." });
+      return json(res, 200, { text: response.text, provider: response.provider });
+    }
+    if (req.method === "POST" && req.url === "/ai/slides") {
+      const body = await readJSON(req);
+      if (!body.prompt?.trim()) return json(res, 400, { error: "A slide description is required" });
+      const response = await llm.generateText({
+        system: "Turn the requested teaching or presentation scope into a concise canonical sequence of slides. Reconcile against the current score context: reuse an existing slide title exactly when it serves the same purpose, consolidate duplicates, and add only missing scaffolding. Each slide needs an expressive title, concise audience-facing body text, and practical presenter notes with source-page references. Preserve useful uncertainty and citations; avoid generic filler.",
+        messages: [{ role: "user", content: `${body.prompt}\n\nCurrent score context:\n${JSON.stringify(body.score || {})}` }],
+        responseSchema: slideSchema
+      });
+      const parsed = JSON.parse(response.text.replace(/^```(?:json)?\s*|\s*```$/g, ""));
+      return json(res, 200, { ...parsed, provider: response.provider });
     }
     if (req.method === "POST" && req.url === "/ai/image") {
       const body = await readJSON(req);
-      const response = await openAI("/images/generations", {
-        model: process.env.OPENAI_IMAGE_MODEL || "gpt-image-2",
-        prompt: `Atmospheric widescreen background art for a graduate studio seminar. ${body.prompt}. No text, no logos, generous visual breathing room, presentation-safe composition.`,
-        size: "1536x1024"
+      const response = await llm.generateImage({
+        prompt: `Atmospheric widescreen background art for a graduate studio seminar. ${body.prompt}. No text, no logos, generous visual breathing room, presentation-safe composition.`
       });
-      const item = response.data?.[0];
-      if (item?.url) return json(res, 200, { url: item.url });
-      if (item?.b64_json) {
+      if (response.url) return json(res, 200, { url: response.url, provider: response.provider });
+      if (response.data) {
         const id = crypto.randomUUID();
-        generatedMedia.set(id, { type: "image/png", data: Buffer.from(item.b64_json, "base64") });
+        generatedMedia.set(id, { type: response.mimeType || "image/png", data: Buffer.from(response.data, "base64") });
         const host = req.headers.host || `127.0.0.1:${port}`;
-        return json(res, 200, { url: `http://${host}/media/${id}` });
+        return json(res, 200, { url: `http://${host}/media/${id}`, provider: response.provider });
       }
       throw new Error("Image generation returned no media");
     }
     return json(res, 404, { error: "Not found" });
   } catch (error) {
-    console.error(error);
-    return json(res, 500, { error: error.message || "Server error" });
+    console.error(error.message || error);
+    return json(res, 500, { error: error.message || "Server error", provider: error.provider || null });
   }
 });
 

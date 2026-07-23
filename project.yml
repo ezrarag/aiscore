@@ -23,6 +23,7 @@ targets:
         NSPhotoLibraryUsageDescription: Select visual art to use as a studio background.
         NSCameraUsageDescription: Record video provocations and class content.
         NSMicrophoneUsageDescription: Record audio for video provocations.
+        NSAppleEventsUsageDescription: Score uses Keynote automation to create and synchronize presentation slides.
     entitlements:
       path: Score/Resources/Score.entitlements
       properties:
@@ -31,6 +32,9 @@ targets:
         com.apple.security.files.user-selected.read-only: true
         com.apple.security.device.camera: true
         com.apple.security.device.audio-input: true
+        com.apple.security.automation.apple-events: true
+        com.apple.security.temporary-exception.apple-events:
+          - com.apple.Keynote
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: edu.uwm.craftingai.score

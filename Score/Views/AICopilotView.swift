@@ -26,9 +26,13 @@ struct AICopilotView: View {
             Divider()
             HStack(alignment: .bottom) {
                 TextField("Ask Score…", text: $prompt, axis: .vertical).textFieldStyle(.roundedBorder).lineLimit(1...5)
+                Button("Draft Slides", systemImage: "rectangle.stack.badge.plus") {
+                    let text = prompt; prompt = ""; Task { await store.generateSlides(from: text) }
+                }
+                .help("Turn this descriptive scope into editable draft slides")
+                .disabled(prompt.isEmpty || store.isWorking)
                 Button("Send", systemImage: "arrow.up.circle.fill") { let text = prompt; prompt = ""; Task { await store.askAI(text) } }.labelStyle(.iconOnly).font(.title2).disabled(prompt.isEmpty || store.isWorking)
             }.padding()
         }
     }
 }
-

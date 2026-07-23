@@ -1,8 +1,33 @@
 import Foundation
 import Observation
+import PDFKit
 #if os(macOS)
 import AppKit
 #endif
+
+enum SlideImportChangeKind: String {
+    case update = "Update"
+    case add = "Add"
+}
+
+struct SlideImportChange: Identifiable {
+    let id = UUID()
+    let kind: SlideImportChangeKind
+    let targetSlideID: UUID?
+    let title: String
+    let oldBody: String?
+    let newBody: String
+    let oldNotes: String?
+    let newNotes: String
+}
+
+struct SlideImportPreview {
+    let scoreID: UUID
+    let sourceName: String
+    let changes: [SlideImportChange]
+    var updateCount: Int { changes.filter { $0.kind == .update }.count }
+    var addCount: Int { changes.filter { $0.kind == .add }.count }
+}
 
 @MainActor @Observable
 final class ScoreStore {
@@ -14,6 +39,9 @@ final class ScoreStore {
     var chat: [ChatMessage] = []
     var isWorking = false
     var errorMessage: String?
+    var slideImportProgress: Double?
+    var slideImportStatus: String?
+    var pendingSlideImport: SlideImportPreview?
     var serverURL: URL {
         get {
             if let raw = UserDefaults.standard.string(forKey: "serverURL"),
@@ -33,6 +61,10 @@ final class ScoreStore {
     var activeBlockID: UUID?
     var activeSlideID: UUID?
     private var syncTimer: Task<Void, Never>?
+    private var keynoteSyncTask: Task<Void, Never>?
+    private var lastAppDeckFingerprint: String?
+    private var lastKeynoteDeckFingerprint: String?
+    var isKeynoteLiveSyncEnabled = false
     
     var roleOverride: AccountRole? = nil
     var currentRole: AccountRole? {
@@ -135,6 +167,159 @@ final class ScoreStore {
             let reply = try await APIClient(baseURL: serverURL, token: account?.token).chat(prompt: prompt, score: score)
             chat.append(ChatMessage(id: UUID(), role: "assistant", text: reply, createdAt: .now))
         } catch { errorMessage = error.localizedDescription }
+    }
+
+    func generateSlides(from prompt: String) async {
+        guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let scoreIndex = scores.firstIndex(where: { $0.id == selectedScoreID }),
+              !scores[scoreIndex].blocks.isEmpty else { return }
+        isWorking = true; defer { isWorking = false }
+        do {
+            let generated = try await APIClient(baseURL: serverURL, token: account?.token)
+                .generateSlides(prompt: prompt, score: scores[scoreIndex])
+            let slides = generated.map {
+                SlideContent(title: $0.title, bodyText: $0.body, mediaType: .none,
+                             approvalState: .pending, notes: $0.notes, slideLabel: .content)
+            }
+            scores[scoreIndex].blocks[scores[scoreIndex].blocks.count - 1].slides.append(contentsOf: slides)
+            chat.append(ChatMessage(id: UUID(), role: "assistant", text: "Created \(slides.count) draft slides from that scope. They are ready to edit here and will flow into Keynote through Live Sync.", createdAt: .now))
+        } catch { errorMessage = "Could not generate slides: \(error.localizedDescription)" }
+    }
+
+    func importSlides(fromPDF url: URL) async {
+        pendingSlideImport = nil
+        slideImportProgress = 0.05
+        slideImportStatus = "Opening \(url.lastPathComponent)…"
+        let accessing = url.startAccessingSecurityScopedResource()
+        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+        guard let document = PDFDocument(url: url) else {
+            slideImportProgress = nil
+            slideImportStatus = nil
+            errorMessage = "Could not read that PDF."
+            return
+        }
+        slideImportProgress = 0.15
+        slideImportStatus = "Extracting text from \(document.pageCount) pages…"
+        var pages: [String] = []
+        for index in 0..<document.pageCount {
+            guard let text = document.page(at: index)?.string?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !text.isEmpty else { continue }
+            pages.append("[SOURCE PAGE \(index + 1)]\n\(text)")
+        }
+        guard !pages.isEmpty else {
+            slideImportProgress = nil
+            slideImportStatus = nil
+            errorMessage = "This PDF contains no selectable text. It appears to be scanned and needs OCR before Score can map its slides."
+            return
+        }
+        slideImportProgress = 0.3
+        slideImportStatus = "Checking the AI provider…"
+        do {
+            let health = try await APIClient(baseURL: serverURL, token: account?.token).health()
+            guard health.ai else {
+                slideImportProgress = nil
+                slideImportStatus = nil
+                errorMessage = "The Score server is running, but no LLM provider API key is configured. Add a provider key to Server/.env and restart the server."
+                return
+            }
+        } catch {
+            slideImportProgress = nil
+            slideImportStatus = nil
+            errorMessage = "The Score server is offline at \(serverURL.absoluteString). Start it with: cd Server && npm start"
+            return
+        }
+        let scope = """
+        Reconcile the following slide-description document against the current Score deck supplied in context. Return one canonical entry for every described slide that should exist after reconciliation. When a described slide is already present, reuse its current title exactly so Score can update it instead of duplicating it. Add only genuinely missing scaffolding or transitions. Respect explicit slide numbers and boundaries. Put the relevant [SOURCE PAGE n] reference in presenter notes. Do not treat headings, page furniture, or repeated summaries as slides.
+
+        \(pages.joined(separator: "\n\n"))
+        """
+        guard let scoreIndex = scores.firstIndex(where: { $0.id == selectedScoreID }) else { return }
+        isWorking = true; defer { isWorking = false }
+        slideImportProgress = 0.45
+        slideImportStatus = "Comparing the document with the current slides…"
+        do {
+            let generated = try await APIClient(baseURL: serverURL, token: account?.token)
+                .generateSlides(prompt: scope, score: scores[scoreIndex])
+            slideImportProgress = 0.85
+            slideImportStatus = "Preparing a reviewable change set…"
+            var changes: [SlideImportChange] = []
+            for item in generated {
+                let key = normalizedSlideTitle(item.title)
+                var match: (Int, Int)?
+                for blockIndex in scores[scoreIndex].blocks.indices {
+                    if let slideIndex = scores[scoreIndex].blocks[blockIndex].slides.firstIndex(where: { normalizedSlideTitle($0.title) == key }) {
+                        match = (blockIndex, slideIndex)
+                        break
+                    }
+                }
+                if let match {
+                    let existing = scores[scoreIndex].blocks[match.0].slides[match.1]
+                    if existing.title != item.title || existing.bodyText != item.body || existing.notes != item.notes {
+                        changes.append(SlideImportChange(
+                            kind: .update, targetSlideID: existing.id, title: item.title,
+                            oldBody: existing.bodyText, newBody: item.body,
+                            oldNotes: existing.notes, newNotes: item.notes
+                        ))
+                    }
+                } else {
+                    changes.append(SlideImportChange(
+                        kind: .add, targetSlideID: nil, title: item.title,
+                        oldBody: nil, newBody: item.body, oldNotes: nil, newNotes: item.notes
+                    ))
+                }
+            }
+            pendingSlideImport = SlideImportPreview(
+                scoreID: scores[scoreIndex].id, sourceName: url.lastPathComponent, changes: changes
+            )
+            slideImportProgress = 1
+            slideImportStatus = changes.isEmpty
+                ? "Review complete · no changes needed"
+                : "Review ready · \(changes.count) proposed changes"
+        } catch {
+            slideImportProgress = nil
+            slideImportStatus = nil
+            errorMessage = "Could not interpret PDF slides: \(error.localizedDescription)"
+        }
+    }
+
+    func applyPendingSlideImport() {
+        guard let preview = pendingSlideImport,
+              let scoreIndex = scores.firstIndex(where: { $0.id == preview.scoreID }) else { return }
+        for change in preview.changes {
+            if let targetID = change.targetSlideID {
+                for blockIndex in scores[scoreIndex].blocks.indices {
+                    guard let slideIndex = scores[scoreIndex].blocks[blockIndex].slides.firstIndex(where: { $0.id == targetID }) else { continue }
+                    scores[scoreIndex].blocks[blockIndex].slides[slideIndex].title = change.title
+                    scores[scoreIndex].blocks[blockIndex].slides[slideIndex].bodyText = change.newBody
+                    scores[scoreIndex].blocks[blockIndex].slides[slideIndex].notes = change.newNotes
+                    break
+                }
+            } else if let lastBlock = scores[scoreIndex].blocks.indices.last {
+                scores[scoreIndex].blocks[lastBlock].slides.append(SlideContent(
+                    title: change.title, bodyText: change.newBody, mediaType: .none,
+                    approvalState: .pending, notes: change.newNotes, slideLabel: .content
+                ))
+            }
+        }
+        let count = preview.changes.count
+        pendingSlideImport = nil
+        slideImportProgress = nil
+        slideImportStatus = nil
+        errorMessage = "Applied \(count) reviewed PDF changes."
+    }
+
+    func discardPendingSlideImport() {
+        pendingSlideImport = nil
+        slideImportProgress = nil
+        slideImportStatus = nil
+    }
+
+    private func normalizedSlideTitle(_ title: String) -> String {
+        title.lowercased()
+            .replacingOccurrences(of: #"^\s*slide\s+\d+\s*[-—:–]?\s*"#, with: "", options: .regularExpression)
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
     }
 
     func generateBackground(prompt: String) async {
@@ -683,11 +868,143 @@ final class ScoreStore {
         #if os(macOS)
         let success = await KeynoteSyncService.shared.createPresentationInKeynote(score: score, themeName: themeName)
         if success {
-            self.errorMessage = "✅ Presentation created live in Apple Keynote!"
+            if KeynoteSyncService.shared.didOpenExistingDocument {
+                let savedSlides = KeynoteSyncService.shared.pullSlidesFromKeynote()
+                if !savedSlides.isEmpty { applyKeynoteSlides(savedSlides) }
+            }
+            startKeynoteLiveSync()
+            self.errorMessage = KeynoteSyncService.shared.didOpenExistingDocument
+                ? "✅ Saved Keynote presentation reopened. Live sync is on."
+                : "✅ Presentation created and saved as a Keynote file. Live sync is on."
         } else {
-            self.errorMessage = "⚠️ Could not launch Keynote. Please ensure Keynote is installed."
+            self.errorMessage = "⚠️ \(KeynoteSyncService.shared.lastError ?? "Keynote automation failed.")"
         }
         #endif
+    }
+
+    @MainActor
+    func saveKeynotePresentation() {
+        guard let score = activeScore else { return }
+        guard KeynoteSyncService.shared.updateFrontPresentation(score: score),
+              KeynoteSyncService.shared.saveFrontPresentation(for: score) else {
+            errorMessage = "Could not save Keynote: \(KeynoteSyncService.shared.lastError ?? "unknown error")"
+            return
+        }
+        lastAppDeckFingerprint = deckFingerprint(score)
+        let slides = KeynoteSyncService.shared.pullSlidesFromKeynote()
+        lastKeynoteDeckFingerprint = keynoteFingerprint(slides)
+        errorMessage = "✅ Score and the Keynote file are saved."
+    }
+
+    @MainActor
+    func startKeynoteLiveSync() {
+        keynoteSyncTask?.cancel()
+        isKeynoteLiveSyncEnabled = true
+        lastAppDeckFingerprint = activeScore.map(deckFingerprint)
+        let keynoteSlides = KeynoteSyncService.shared.pullSlidesFromKeynote()
+        lastKeynoteDeckFingerprint = keynoteSlides.isEmpty ? nil : keynoteFingerprint(keynoteSlides)
+        keynoteSyncTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                guard !Task.isCancelled, let self else { break }
+                self.performKeynoteLiveSync()
+            }
+        }
+    }
+
+    @MainActor
+    func stopKeynoteLiveSync() {
+        keynoteSyncTask?.cancel()
+        keynoteSyncTask = nil
+        isKeynoteLiveSyncEnabled = false
+        lastAppDeckFingerprint = nil
+        lastKeynoteDeckFingerprint = nil
+    }
+
+    @MainActor
+    private func performKeynoteLiveSync() {
+        guard isKeynoteLiveSyncEnabled, let score = activeScore else { return }
+        let keynoteSlides = KeynoteSyncService.shared.pullSlidesFromKeynote()
+        guard !keynoteSlides.isEmpty else {
+            stopKeynoteLiveSync()
+            errorMessage = "Keynote live sync stopped because the presentation was closed."
+            return
+        }
+        KeynoteSyncService.shared.captureFrontDocumentLocation(for: score.id)
+
+        let keynoteDeckFingerprint = keynoteFingerprint(keynoteSlides)
+        let keynoteChanged = lastKeynoteDeckFingerprint.map { $0 != keynoteDeckFingerprint } ?? false
+
+        if keynoteChanged {
+            // Pull edits silently from Keynote into Score without hijacking Keynote GUI focus
+            applyKeynoteSlides(keynoteSlides)
+            lastAppDeckFingerprint = activeScore.map(deckFingerprint)
+            lastKeynoteDeckFingerprint = keynoteDeckFingerprint
+        }
+    }
+
+    private var activeScore: StudioScore? {
+        scores.first(where: { $0.id == activeScoreID }) ?? scores.first
+    }
+
+    private func deckFingerprint(_ score: StudioScore) -> String {
+        score.blocks.flatMap(\.slides).map { "\($0.title)\u{1F}\($0.bodyText)\u{1F}\($0.notes)" }.joined(separator: "\u{1E}")
+    }
+
+    private func keynoteFingerprint(_ slides: [KeynoteSyncService.KeynoteSlideData]) -> String {
+        slides.map { slide in
+            let images = slide.images.map { "\($0.path)|\($0.x)|\($0.y)|\($0.width)|\($0.height)|\($0.rotation)|\($0.opacity)" }.joined(separator: ";")
+            return "\(slide.title)\u{1F}\(slide.body)\u{1F}\(slide.notes)\u{1F}\(images)"
+        }.joined(separator: "\u{1E}")
+    }
+
+    @MainActor
+    private func applyKeynoteSlides(_ keynoteSlides: [KeynoteSyncService.KeynoteSlideData]) {
+        guard let activeScoreIndex = scores.firstIndex(where: { $0.id == activeScoreID }) else { return }
+        var refs: [(Int, Int)] = []
+        for blockIndex in scores[activeScoreIndex].blocks.indices {
+            for slideIndex in scores[activeScoreIndex].blocks[blockIndex].slides.indices { refs.append((blockIndex, slideIndex)) }
+        }
+        for (offset, keynoteSlide) in keynoteSlides.enumerated() where offset < refs.count {
+            let ref = refs[offset]
+            scores[activeScoreIndex].blocks[ref.0].slides[ref.1].title = keynoteSlide.title
+            scores[activeScoreIndex].blocks[ref.0].slides[ref.1].bodyText = keynoteSlide.body
+            scores[activeScoreIndex].blocks[ref.0].slides[ref.1].notes = keynoteSlide.notes
+            let slideID = scores[activeScoreIndex].blocks[ref.0].slides[ref.1].id
+            let importedImages = keynoteSlide.images.compactMap {
+                KeynoteSyncService.shared.importImageAsset($0, scoreID: scores[activeScoreIndex].id, slideID: slideID)
+            }
+            scores[activeScoreIndex].blocks[ref.0].slides[ref.1].mediaItems = importedImages
+            scores[activeScoreIndex].blocks[ref.0].slides[ref.1].mediaType = importedImages.isEmpty ? .none : .image
+            scores[activeScoreIndex].blocks[ref.0].slides[ref.1].mediaURL = importedImages.first?.url
+        }
+        if keynoteSlides.count > refs.count {
+            if scores[activeScoreIndex].blocks.isEmpty {
+                scores[activeScoreIndex].blocks.append(ScoreBlock(
+                    minutes: 15, phase: .wonder, thinkingWith: "Keynote", why: "Keynote presentation",
+                    mode: .lecture, medium: "Keynote", cue: "Present", atmosphere: "Engaged"
+                ))
+            }
+            let targetBlock = scores[activeScoreIndex].blocks.count - 1
+            for slide in keynoteSlides.dropFirst(refs.count) {
+                scores[activeScoreIndex].blocks[targetBlock].slides.append(SlideContent(
+                    title: slide.title.isEmpty ? "Slide \(slide.index)" : slide.title,
+                    bodyText: slide.body, mediaType: .none, approvalState: .pending,
+                    notes: slide.notes, slideLabel: .content
+                ))
+            }
+        } else if keynoteSlides.count < refs.count {
+            var slidesToRemove = refs.count - keynoteSlides.count
+            for blockIndex in scores[activeScoreIndex].blocks.indices.reversed() where slidesToRemove > 0 {
+                let count = scores[activeScoreIndex].blocks[blockIndex].slides.count
+                let removalCount = min(count, slidesToRemove)
+                if removalCount > 0 {
+                    scores[activeScoreIndex].blocks[blockIndex].slides.removeLast(removalCount)
+                    slidesToRemove -= removalCount
+                }
+            }
+        }
+        scheduleSave()
     }
     
     @MainActor
@@ -1289,17 +1606,17 @@ final class KeynoteSyncService: ObservableObject {
     @Published var isKeynoteRunning: Bool = false
     @Published var activePresentationName: String? = nil
     @Published var isAutoSyncEnabled: Bool = false
+    private(set) var lastError: String?
+    private(set) var didOpenExistingDocument = false
     
     private init() {}
     
-    private var targetAppNames: [String] {
-        return ["Keynote Creator Studio", "Keynote"]
-    }
+    private let keynoteBundleID = "com.apple.Keynote"
     
     func checkKeynoteStatus() -> Bool {
         #if os(macOS)
         let apps = NSWorkspace.shared.runningApplications
-        let running = apps.contains { $0.bundleIdentifier == "com.apple.iWork.Keynote" || targetAppNames.contains($0.localizedName ?? "") }
+        let running = apps.contains { $0.bundleIdentifier == keynoteBundleID || $0.bundleIdentifier == "com.apple.iWork.Keynote" }
         self.isKeynoteRunning = running
         return running
         #else
@@ -1317,108 +1634,124 @@ final class KeynoteSyncService: ObservableObject {
         }
         guard !allSlides.isEmpty else { return false }
         
-        for appName in targetAppNames {
-            var scriptSource = """
-            tell application "\(appName)"
+        guard NSWorkspace.shared.urlForApplication(withBundleIdentifier: keynoteBundleID) != nil else {
+            lastError = "Keynote is not installed (bundle \(keynoteBundleID) was not found)."
+            return false
+        }
+
+        if let existingURL = associatedDocumentURL(for: score.id), FileManager.default.fileExists(atPath: existingURL.path) {
+            let openScript = """
+            tell application id "\(keynoteBundleID)"
                 activate
-                set doc to missing value
-                try
-                    set doc to make new document with properties {document theme:theme "\(cleanTheme)"}
-                on error
-                    try
-                        set doc to make new document
-                    end try
-                end try
-                
-                if doc is not missing value then
-                    tell doc
-            """
-            
-            for (index, slide) in allSlides.enumerated() {
-                let cleanTitle = escapeAppleScriptString(slide.title)
-                let cleanBody = escapeAppleScriptString(slide.bodyText)
-                let cleanNotes = escapeAppleScriptString(slide.notes)
-                let question = escapeAppleScriptString(slide.liveQuestion ?? "")
-                
-                var fullNotes = cleanNotes
-                if !question.isEmpty {
-                    fullNotes += "\\n\\n[LIVE PROVOCATION]: " + question
-                }
-                
-                if index == 0 {
-                    scriptSource += """
-                    
-                    set currentSlide to slide 1
-                    """
-                } else {
-                    scriptSource += """
-                    
-                    set currentSlide to make new slide at end of slides
-                    """
-                }
-                
-                scriptSource += """
-                
-                if currentSlide is not missing value then
-                    tell currentSlide
-                        try
-                            set presenter notes to "\(fullNotes)"
-                        end try
-                        try
-                            set textList to object text of every text item
-                            if (count of textList) > 0 then
-                                set object text of text item 1 to "\(cleanTitle)"
-                            end if
-                            if (count of textList) > 1 then
-                                set object text of text item 2 to "\(cleanBody)"
-                            end if
-                        on error
-                            try
-                                set title to "\(cleanTitle)"
-                            end try
-                            try
-                                set body to "\(cleanBody)"
-                            end try
-                        end try
-                    end tell
-                end if
-                """
-            }
-            
-            scriptSource += """
-                    end tell
-                    return true
-                end if
-                return false
+                open POSIX file "\(escapeAppleScriptString(existingURL.path))"
+                return true
             end tell
             """
-            
-            if executeAppleScript(scriptSource) {
+            if executeAppleScript(openScript) {
+                didOpenExistingDocument = true
+                lastError = nil
                 return true
             }
+        }
+
+        didOpenExistingDocument = false
+
+        let scriptSource = """
+            tell application id "\(keynoteBundleID)"
+                activate
+                try
+                    make new document with properties {document theme:theme "\(cleanTheme)"}
+                on error
+                    make new document
+                end try
+                return true
+            end tell
+            """
+
+        if executeAppleScript(scriptSource), updateFrontPresentation(score: score), saveFrontPresentation(for: score) {
+            isKeynoteRunning = true
+            lastError = nil
+            return true
         }
         return false
         #else
         return false
         #endif
     }
+
+    func saveFrontPresentation(for score: StudioScore) -> Bool {
+        #if os(macOS)
+        let url = associatedDocumentURL(for: score.id) ?? defaultDocumentURL(for: score)
+        do {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        } catch {
+            lastError = "Could not create the Keynote deck folder: \(error.localizedDescription)"
+            return false
+        }
+        let script = """
+        tell application id "\(keynoteBundleID)"
+            if (count of documents) is 0 then error "No Keynote document is open."
+            save front document in POSIX file "\(escapeAppleScriptString(url.path))"
+            return true
+        end tell
+        """
+        guard executeAppleScript(script) else { return false }
+        rememberDocument(url, for: score.id)
+        return true
+        #else
+        return false
+        #endif
+    }
+
+    func captureFrontDocumentLocation(for scoreID: UUID) {
+        #if os(macOS)
+        let script = """
+        tell application id "\(keynoteBundleID)"
+            if (count of documents) is 0 then return ""
+            try
+                return POSIX path of (file of front document)
+            on error
+                return ""
+            end try
+        end tell
+        """
+        if let path = executeAppleScriptWithOutput(script), path.hasPrefix("/") {
+            rememberDocument(URL(fileURLWithPath: path), for: scoreID)
+        }
+        #endif
+    }
+
+    private func associatedDocumentURL(for scoreID: UUID) -> URL? {
+        guard let path = UserDefaults.standard.string(forKey: "keynote.document.\(scoreID.uuidString)") else { return nil }
+        return URL(fileURLWithPath: path)
+    }
+
+    private func rememberDocument(_ url: URL, for scoreID: UUID) {
+        UserDefaults.standard.set(url.path, forKey: "keynote.document.\(scoreID.uuidString)")
+    }
+
+    private func defaultDocumentURL(for score: StudioScore) -> URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("Score/Keynote Decks", isDirectory: true)
+        let safeTitle = score.title.components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }.joined(separator: "_")
+        return base.appendingPathComponent("Week_\(score.week)_\(safeTitle.isEmpty ? "Score" : safeTitle)_\(score.id.uuidString.prefix(8)).key")
+    }
     
     func jumpToSlideInKeynote(slideIndex: Int) {
         #if os(macOS)
-        for appName in targetAppNames {
-            let script = """
-            tell application "\(appName)"
+        let script = """
+            tell application id "\(keynoteBundleID)"
                 if (count of documents) > 0 then
                     tell front document
-                        if slideIndex <= (count of slides) then
+                        if \(slideIndex + 1) <= (count of slides) then
                             show slide \(slideIndex + 1)
                         end if
                     end tell
                 end if
             end tell
             """
-            if executeAppleScript(script) { break }
-        }
+        _ = executeAppleScript(script)
         #endif
     }
     
@@ -1427,13 +1760,23 @@ final class KeynoteSyncService: ObservableObject {
         let title: String
         let body: String
         let notes: String
+        let images: [KeynoteImageData]
+    }
+
+    struct KeynoteImageData {
+        let path: String
+        let x: Int
+        let y: Int
+        let width: Int
+        let height: Int
+        let rotation: Int
+        let opacity: Int
     }
     
     func pullSlidesFromKeynote() -> [KeynoteSlideData] {
         #if os(macOS)
-        for appName in targetAppNames {
-            let script = """
-            tell application "\(appName)"
+        let script = """
+            tell application id "\(keynoteBundleID)"
                 if (count of documents) is 0 then return ""
                 set slideData to ""
                 tell front document
@@ -1442,6 +1785,7 @@ final class KeynoteSyncService: ObservableObject {
                         set t to ""
                         set b to ""
                         set n to ""
+                        set imageData to ""
                         
                         try
                             set n to presenter notes of s
@@ -1456,32 +1800,154 @@ final class KeynoteSyncService: ObservableObject {
                                 set b to item 2 of textList
                             end if
                         end try
+
+                        try
+                            repeat with im in every image of s
+                                set imagePosition to position of im
+                                set imagePath to POSIX path of (file of im)
+                                set imageData to imageData & imagePath & "<I>" & (item 1 of imagePosition) & "<I>" & (item 2 of imagePosition) & "<I>" & (width of im) & "<I>" & (height of im) & "<I>" & (rotation of im) & "<I>" & (opacity of im) & "<IMAGE>"
+                            end repeat
+                        end try
                         
-                        set slideData to slideData & i & "|||" & t & "|||" & b & "|||" & n & "<<<SLIDE_BREAK>>>"
+                        set slideData to slideData & i & "|||" & t & "|||" & b & "|||" & n & "|||" & imageData & "<<<SLIDE_BREAK>>>"
                     end repeat
                 end tell
                 return slideData
             end tell
             """
             
-            if let output = executeAppleScriptWithOutput(script), !output.isEmpty {
+        if let output = executeAppleScriptWithOutput(script), !output.isEmpty {
                 var result: [KeynoteSlideData] = []
                 let slideBlocks = output.components(separatedBy: "<<<SLIDE_BREAK>>>")
                 for blockStr in slideBlocks where !blockStr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     let parts = blockStr.components(separatedBy: "|||")
-                    if parts.count >= 4, let idx = Int(parts[0]) {
-                        result.append(KeynoteSlideData(index: idx, title: parts[1], body: parts[2], notes: parts[3]))
+                    if parts.count >= 5, let idx = Int(parts[0]) {
+                        let images = parts[4].components(separatedBy: "<IMAGE>").compactMap { value -> KeynoteImageData? in
+                            let fields = value.components(separatedBy: "<I>")
+                            guard fields.count == 7,
+                                  let x = Int(fields[1]), let y = Int(fields[2]),
+                                  let width = Int(fields[3]), let height = Int(fields[4]),
+                                  let rotation = Int(fields[5]), let opacity = Int(fields[6]) else { return nil }
+                            return KeynoteImageData(path: fields[0], x: x, y: y, width: width, height: height, rotation: rotation, opacity: opacity)
+                        }
+                        result.append(KeynoteSlideData(index: idx, title: parts[1], body: parts[2], notes: parts[3], images: images))
                     }
                 }
-                if !result.isEmpty {
-                    return result
-                }
+            if !result.isEmpty {
+                lastError = nil
+                return result
             }
         }
         return []
         #else
         return []
         #endif
+    }
+
+    func updateFrontPresentation(score: StudioScore) -> Bool {
+        #if os(macOS)
+        let slides = score.blocks.flatMap(\.slides)
+        guard !slides.isEmpty else { return false }
+        let sizingScript = """
+        tell application id "\(keynoteBundleID)"
+            if (count of documents) is 0 then error "No Keynote document is open."
+            tell front document
+                repeat while (count of slides) < \(slides.count)
+                    make new slide at end of slides
+                end repeat
+                repeat while (count of slides) > \(slides.count)
+                    delete last slide
+                end repeat
+            end tell
+            return true
+        end tell
+        """
+        guard executeAppleScript(sizingScript) else { return false }
+
+        for (offset, slide) in slides.enumerated() {
+            var notes = slide.notes
+            if let question = slide.liveQuestion, !question.isEmpty {
+                notes += "\n\n[LIVE PROVOCATION]: \(question)"
+            }
+            let slideScript = """
+            tell application id "\(keynoteBundleID)"
+                tell front document
+                tell slide \(offset + 1)
+                    delete every image
+                    try
+                        set object text of default title item to "\(escapeAppleScriptString(slide.title))"
+                    end try
+                    try
+                        set object text of default body item to "\(escapeAppleScriptString(slide.bodyText))"
+                    end try
+                    try
+                        set presenter notes to "\(escapeAppleScriptString(notes))"
+                    end try
+                end tell
+                end tell
+                return true
+            end tell
+            """
+            guard executeAppleScript(slideScript) else {
+                lastError = "Slide \(offset + 1) could not be synchronized. \(lastError ?? "")"
+                return false
+            }
+            for item in slide.mediaItems ?? [] where item.type == .image {
+                guard let imageURL = localFileURL(from: item.url), FileManager.default.fileExists(atPath: imageURL.path) else { continue }
+                let x = item.keynoteX ?? 120
+                let y = item.keynoteY ?? 180
+                let width = item.keynoteWidth ?? 720
+                let height = item.keynoteHeight ?? 480
+                let rotation = item.keynoteRotation ?? 0
+                let opacity = item.keynoteOpacity ?? 100
+                let imageScript = """
+                tell application id "\(keynoteBundleID)"
+                    tell slide \(offset + 1) of front document
+                        make new image with properties {file:POSIX file "\(escapeAppleScriptString(imageURL.path))", position:{\(x), \(y)}, width:\(width), height:\(height), rotation:\(rotation), opacity:\(opacity)}
+                    end tell
+                    return true
+                end tell
+                """
+                guard executeAppleScript(imageScript) else {
+                    lastError = "Image on slide \(offset + 1) could not be synchronized. \(lastError ?? "")"
+                    return false
+                }
+            }
+        }
+        lastError = nil
+        return true
+        #else
+        return false
+        #endif
+    }
+
+    func importImageAsset(_ image: KeynoteImageData, scoreID: UUID, slideID: UUID) -> SlideMediaItem? {
+        let source = URL(fileURLWithPath: image.path)
+        guard FileManager.default.fileExists(atPath: source.path) else { return nil }
+        let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("Score/Keynote Assets/\(scoreID.uuidString)/\(slideID.uuidString)", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let name = source.deletingPathExtension().lastPathComponent
+            let fingerprint = "\(image.x)_\(image.y)_\(image.width)_\(image.height)"
+            let destination = folder.appendingPathComponent("\(name)_\(fingerprint).\(source.pathExtension)")
+            if !FileManager.default.fileExists(atPath: destination.path) {
+                try FileManager.default.copyItem(at: source, to: destination)
+            }
+            return SlideMediaItem(url: destination.absoluteString, type: .image,
+                                  keynoteX: image.x, keynoteY: image.y,
+                                  keynoteWidth: image.width, keynoteHeight: image.height,
+                                  keynoteRotation: image.rotation, keynoteOpacity: image.opacity)
+        } catch {
+            lastError = "Could not copy a Keynote image into Score: \(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    private func localFileURL(from value: String) -> URL? {
+        if let url = URL(string: value), url.isFileURL { return url }
+        if value.hasPrefix("/") { return URL(fileURLWithPath: value) }
+        return nil
     }
     
     private func escapeAppleScriptString(_ str: String) -> String {
@@ -1500,6 +1966,7 @@ final class KeynoteSyncService: ObservableObject {
             if error == nil {
                 return descriptor.booleanValue || descriptor.stringValue != nil || true
             } else {
+                lastError = appleScriptErrorMessage(error)
                 print("⚠️ NSAppleScript Error: \(String(describing: error)) — attempting osascript process fallback")
             }
         }
@@ -1531,6 +1998,8 @@ final class KeynoteSyncService: ObservableObject {
         process.arguments = ["-e", source]
         let pipe = Pipe()
         process.standardOutput = pipe
+        let errorPipe = Pipe()
+        process.standardError = errorPipe
         
         do {
             try process.run()
@@ -1540,6 +2009,9 @@ final class KeynoteSyncService: ObservableObject {
                 let str = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                 return str.isEmpty ? "SUCCESS" : str
             } else {
+                let data = errorPipe.fileHandleForReading.readDataToEndOfFile()
+                let detail = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                lastError = detail?.isEmpty == false ? detail : "Keynote automation exited with status \(process.terminationStatus)."
                 print("⚠️ osascript exit status: \(process.terminationStatus)")
             }
         } catch {
@@ -1547,5 +2019,16 @@ final class KeynoteSyncService: ObservableObject {
         }
         #endif
         return nil
+    }
+
+
+    private func appleScriptErrorMessage(_ error: NSDictionary?) -> String {
+        guard let error else { return "Keynote automation failed." }
+        let message = error[NSAppleScript.errorMessage] as? String ?? "Keynote automation failed."
+        let number = error[NSAppleScript.errorNumber] as? Int
+        if number == -1743 {
+            return "Score does not have permission to control Keynote. Enable Score under System Settings › Privacy & Security › Automation, then try again."
+        }
+        return number.map { "\(message) (AppleScript error \($0))" } ?? message
     }
 }

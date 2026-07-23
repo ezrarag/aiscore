@@ -28,10 +28,39 @@ Node 20+ is required. Keep the API key here—never in the Apple app:
 
 ```sh
 cd Server
-OPENAI_API_KEY=your_key_here npm start
+cp .env.example .env
+# Edit .env and add your API credentials, then:
+npm start
 ```
 
 The app defaults to `http://127.0.0.1:8787`. Change the URL in Settings when testing on a physical device. The demo sign-in falls back to local mode when the server is unavailable; AI requests require the server.
+
+### Choose an AI provider and fallbacks
+
+Score supports OpenAI, Anthropic, and Gemini behind the same server interface. Configure the primary provider and optional fallback order in `Server/.env`:
+
+```dotenv
+LLM_PROVIDER=anthropic
+LLM_FALLBACK_ORDER=gemini,openai
+
+ANTHROPIC_API_KEY=your_key
+ANTHROPIC_TEXT_MODEL=your_anthropic_model
+GEMINI_API_KEY=your_key
+GEMINI_TEXT_MODEL=your_gemini_model
+OPENAI_API_KEY=your_key
+OPENAI_TEXT_MODEL=your_openai_model
+OPENAI_IMAGE_MODEL=your_openai_image_model
+```
+
+Restart `npm start` after changing `.env`. The router falls back only for missing keys, authentication failures, quota/billing failures, or an unsupported capability. It logs the provider that served each request without logging credentials. Anthropic does not provide image generation; leave `ANTHROPIC_IMAGE_MODEL` empty. Gemini image output requires a compatible model in `GEMINI_IMAGE_MODEL`; otherwise an image request can fall back to OpenAI when configured.
+
+Inspect configuration without exposing secrets:
+
+```sh
+curl http://127.0.0.1:8787/health
+```
+
+The response identifies the primary, active, and fallback providers and reports only whether each key is loaded.
 
 ## Security and production notes
 

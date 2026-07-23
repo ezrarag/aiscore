@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct IdentifiableUUID: Identifiable {
     let id: UUID
@@ -14,6 +15,7 @@ struct ScoreTimelineView: View {
     @State private var showServerConfig = false
     @State private var showKeynoteThemePicker = false
     @State private var editingProvocationSlideID: UUID? = nil
+    @State private var showPDFImporter = false
 
     var body: some View {
         ScrollView {
@@ -75,51 +77,98 @@ struct ScoreTimelineView: View {
                         .buttonStyle(.bordered)
                     }
                     
-                    HStack(spacing: 10) {
-                        Button("Open in Keynote (Current State)", systemImage: "play.desktopcomputer") {
-                            Task { await store.createLiveKeynote(themeName: "Basic Black") }
+                    HStack(spacing: 12) {
+                        Menu {
+                            Button("Open or Reopen Saved Presentation", systemImage: "play.desktopcomputer") {
+                                Task { await store.createLiveKeynote(themeName: "Basic Black") }
+                            }
+                            Button("Save Score Changes to Keynote", systemImage: "square.and.arrow.down") {
+                                store.saveKeynotePresentation()
+                            }
+                            Button("Pull Changes from Keynote Now", systemImage: "arrow.down.circle") {
+                                store.pullFromKeynote()
+                            }
+                            Divider()
+                            Button("Choose Keynote Theme…", systemImage: "paintbrush") {
+                                showKeynoteThemePicker = true
+                            }
+                            Button("Import Open Keynote as New Week", systemImage: "plus.rectangle.on.folder") {
+                                store.importKeynoteAsNewScore()
+                            }
+                        } label: {
+                            Label("Keynote", systemImage: "play.rectangle.on.rectangle")
                         }
+                        .menuStyle(.button)
                         .buttonStyle(.borderedProminent)
                         .tint(.purple)
-                        
-                        Button("Choose Theme...", systemImage: "paintbrush") {
-                            showKeynoteThemePicker = true
+
+                        HStack(spacing: 7) {
+                            Circle()
+                                .fill(store.isKeynoteLiveSyncEnabled ? Color.green : Color.secondary)
+                                .frame(width: 8, height: 8)
+                            Text(store.isKeynoteLiveSyncEnabled ? "Live Sync On" : "Live Sync Off")
+                                .font(.callout.weight(.medium))
+                            Toggle("", isOn: Binding(
+                                get: { store.isKeynoteLiveSyncEnabled },
+                                set: { enabled in
+                                    if enabled { store.startKeynoteLiveSync() }
+                                    else { store.stopKeynoteLiveSync() }
+                                }
+                            ))
+                            .labelsHidden()
+                            .toggleStyle(.switch)
                         }
-                        .buttonStyle(.bordered)
-                        
-                        Button("Sync from Keynote", systemImage: "arrow.triangle.2.circlepath") {
-                            store.pullFromKeynote()
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(.quaternary, in: Capsule())
+                        .help("Synchronize slide structure, text, notes, and supported images with the front Keynote document.")
+
+                        Menu {
+                            Button("Import Slide Descriptions from PDF", systemImage: "doc.richtext") {
+                                showPDFImporter = true
+                            }
+                            Button("Import Google Sheet CSV URL", systemImage: "tablecells") {
+                                guard let url = URL(string: csvURLString) else { return }
+                                Task {
+                                    do {
+                                        try await store.importFromCSV(url: url)
+                                        csvURLString = ""
+                                    } catch {
+                                        store.errorMessage = "Failed to import CSV: \(error.localizedDescription)"
+                                    }
+                                }
+                            }
+                            .disabled(URL(string: csvURLString) == nil)
+                        } label: {
+                            Label("Import", systemImage: "square.and.arrow.down.on.square")
                         }
+                        .menuStyle(.button)
                         .buttonStyle(.bordered)
-                        
-                        Button("Import as New Week", systemImage: "plus.rectangle.on.folder") {
-                            store.importKeynoteAsNewScore()
+
+                        Menu {
+                            Button("Export Browser Deck", systemImage: "macwindow.and.cursorarrow") {
+                                exportHTMLSlideshow()
+                            }
+                            Button("Copy Score as CSV", systemImage: "doc.on.doc") {
+                                let csv = store.exportToCSV()
+                                #if os(macOS)
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(csv, forType: .string)
+                                #else
+                                UIPasteboard.general.string = csv
+                                #endif
+                                store.errorMessage = "CSV copied to clipboard!"
+                            }
+                        } label: {
+                            Label("Export", systemImage: "square.and.arrow.up")
                         }
+                        .menuStyle(.button)
                         .buttonStyle(.bordered)
-                        
-                        Button("Export Deck File", systemImage: "macwindow.and.cursorarrow") {
-                            exportHTMLSlideshow()
-                        }
-                        .buttonStyle(.bordered)
-                        
-                        Button("Copy CSV", systemImage: "doc.on.doc") {
-                            let csv = store.exportToCSV()
-                            #if os(macOS)
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(csv, forType: .string)
-                            #else
-                            UIPasteboard.general.string = csv
-                            #endif
-                            store.errorMessage = "CSV copied to clipboard!"
-                        }
-                        .buttonStyle(.bordered)
-                        
+
                         Spacer()
-                        
-                        Button("Server Settings", systemImage: "network") {
-                            showServerConfig = true
-                        }
-                        .buttonStyle(.bordered)
+
+                        Button("Server", systemImage: "network") { showServerConfig = true }
+                            .buttonStyle(.bordered)
                     }
                 }
                 .padding(14)
@@ -172,6 +221,15 @@ struct ScoreTimelineView: View {
         }
         .sheet(isPresented: $showKeynoteThemePicker) {
             KeynoteThemePickerSheet()
+        }
+        .fileImporter(isPresented: $showPDFImporter, allowedContentTypes: [.pdf], allowsMultipleSelection: false) { result in
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
+                Task { await store.importSlides(fromPDF: url) }
+            case .failure(let error):
+                store.errorMessage = "Could not open PDF: \(error.localizedDescription)"
+            }
         }
     }
 
@@ -325,6 +383,8 @@ struct ServerConfigSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var serverAddress: String = ""
     @State private var pingSuccess: Bool?
+    @State private var aiConfigured: Bool?
+    @State private var activeProvider: String?
     @State private var pinging = false
     
     var body: some View {
@@ -375,6 +435,12 @@ struct ServerConfigSheet: View {
                 }
                 Spacer()
             }
+
+            if pingSuccess == true, let aiConfigured {
+                Label(aiConfigured ? "AI ready\(activeProvider.map { " · \($0.capitalized)" } ?? "")" : "Server connected, but no provider API key is loaded", systemImage: aiConfigured ? "sparkles" : "key.slash")
+                    .font(.caption.bold())
+                    .foregroundStyle(aiConfigured ? .green : .orange)
+            }
             
             Button("Save Address") {
                 if let url = URL(string: serverAddress) {
@@ -394,20 +460,17 @@ struct ServerConfigSheet: View {
     }
     
     private func testConnection() {
-        guard let url = URL(string: serverAddress)?.appendingPathComponent("/score/sync") else { return }
+        guard let baseURL = URL(string: serverAddress) else { return }
         pinging = true
         pingSuccess = nil
+        aiConfigured = nil
+        activeProvider = nil
         Task {
-            var request = URLRequest(url: url)
-            request.httpMethod = "GET"
-            request.timeoutInterval = 3.0
             do {
-                let (_, response) = try await URLSession.shared.data(for: request)
-                if let http = response as? HTTPURLResponse, http.statusCode == 200 {
-                    pingSuccess = true
-                } else {
-                    pingSuccess = false
-                }
+                let health = try await APIClient(baseURL: baseURL).health()
+                pingSuccess = health.ok
+                aiConfigured = health.ai
+                activeProvider = health.activeProvider
             } catch {
                 pingSuccess = false
             }
@@ -1365,6 +1428,3 @@ struct ThemePreviewCard: View {
         }
     }
 }
-
-
-
