@@ -715,7 +715,7 @@ final class ScoreStore {
         guard let activeScoreIndex = scores.firstIndex(where: { $0.id == activeScoreID }) else { return }
         let keynoteSlides = KeynoteSyncService.shared.pullSlidesFromKeynote()
         guard !keynoteSlides.isEmpty else {
-            self.errorMessage = "⚠️ No active document open in Keynote."
+            self.errorMessage = "⚠️ No active document open in Keynote. Open your presentation in Keynote first."
             return
         }
         
@@ -743,8 +743,92 @@ final class ScoreStore {
                 updatedCount += 1
             }
         }
+        
+        // Safely append any additional slides from Keynote without overwriting existing data
+        if keynoteSlides.count > flatSlideRefs.count {
+            var newSlides: [SlideContent] = []
+            for idx in flatSlideRefs.count..<keynoteSlides.count {
+                let kSlide = keynoteSlides[idx]
+                let newSlide = SlideContent(
+                    title: kSlide.title.isEmpty ? "Slide \(kSlide.index)" : kSlide.title,
+                    bodyText: kSlide.body,
+                    mediaType: .none,
+                    approvalState: .approved,
+                    notes: kSlide.notes,
+                    slideLabel: .content
+                )
+                newSlides.append(newSlide)
+            }
+            if !newSlides.isEmpty {
+                let newBlock = ScoreBlock(
+                    id: UUID(),
+                    minutes: 15,
+                    phase: .wonder,
+                    thinkingWith: "Keynote Import",
+                    why: "Imported Presentation Deck",
+                    mode: .lecture,
+                    medium: "Keynote Slides",
+                    cue: "Keynote Import",
+                    atmosphere: "Engaged Studio",
+                    slides: newSlides
+                )
+                scores[activeScoreIndex].blocks.append(newBlock)
+            }
+        }
+        
         scheduleSave()
-        self.errorMessage = "🔄 Synced \(updatedCount) slides from Keynote into AIScore!"
+        self.errorMessage = "🔄 Synced \(keynoteSlides.count) slides from Keynote into AIScore!"
+    }
+    
+    @MainActor
+    func importKeynoteAsNewScore() {
+        let keynoteSlides = KeynoteSyncService.shared.pullSlidesFromKeynote()
+        guard !keynoteSlides.isEmpty else {
+            self.errorMessage = "⚠️ No active document open in Keynote. Open your presentation in Keynote first."
+            return
+        }
+        
+        let nextWeek = (scores.map { $0.week }.max() ?? 0) + 1
+        var importedSlides: [SlideContent] = []
+        
+        for kSlide in keynoteSlides {
+            let slide = SlideContent(
+                title: kSlide.title.isEmpty ? "Slide \(kSlide.index)" : kSlide.title,
+                bodyText: kSlide.body,
+                mediaType: .none,
+                approvalState: .approved,
+                notes: kSlide.notes,
+                slideLabel: .content
+            )
+            importedSlides.append(slide)
+        }
+        
+        let newBlock = ScoreBlock(
+            id: UUID(),
+            minutes: 20,
+            phase: .wonder,
+            thinkingWith: "Keynote Deck",
+            why: "Imported Presentation Deck",
+            mode: .lecture,
+            medium: "Keynote Slides",
+            cue: "Keynote Import",
+            atmosphere: "Engaged Studio",
+            slides: importedSlides
+        )
+        
+        let newScore = StudioScore(
+            id: UUID(),
+            week: nextWeek,
+            title: "Week \(nextWeek) · Keynote Import",
+            bigQuestion: "Imported from Keynote Presentation",
+            startTime: Date(),
+            blocks: [newBlock]
+        )
+        
+        scores.append(newScore)
+        activeScoreID = newScore.id
+        scheduleSave()
+        self.errorMessage = "✨ Imported \(keynoteSlides.count) slides from Keynote as new Week \(nextWeek) deck!"
     }
 
     func exportToHTML(score: StudioScore) -> String {

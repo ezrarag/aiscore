@@ -87,6 +87,11 @@ struct ScoreTimelineView: View {
                         }
                         .buttonStyle(.bordered)
                         
+                        Button("Import as New Week", systemImage: "plus.rectangle.on.folder") {
+                            store.importKeynoteAsNewScore()
+                        }
+                        .buttonStyle(.bordered)
+                        
                         Button("Export Deck File", systemImage: "macwindow.and.cursorarrow") {
                             exportHTMLSlideshow()
                         }
