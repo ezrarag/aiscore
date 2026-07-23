@@ -681,12 +681,6 @@ final class ScoreStore {
         guard let score = scores.first(where: { $0.id == activeScoreID }) ?? scores.first else { return }
         
         #if os(macOS)
-        let keynoteURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.iWork.Keynote")
-        guard keynoteURL != nil else {
-            self.errorMessage = "⚠️ Keynote app is not installed on this Mac. Please install Keynote from the App Store."
-            return
-        }
-        
         let success = await KeynoteSyncService.shared.createPresentationInKeynote(score: score, themeName: themeName)
         if success {
             self.errorMessage = "✅ Presentation created live in Apple Keynote!"
@@ -702,7 +696,7 @@ final class ScoreStore {
                 try html.write(to: fileURL, atomically: true, encoding: .utf8)
                 NSWorkspace.shared.open(fileURL)
                 NSWorkspace.shared.activateFileViewerSelecting([fileURL])
-                self.errorMessage = "✅ Keynote Deck exported to Downloads & opened!\n(If prompted, allow AIScore in System Settings → Privacy & Security → Automation)"
+                self.errorMessage = "✅ Keynote Deck exported to Downloads & opened!"
             } catch {
                 self.errorMessage = "⚠️ Could not generate Keynote presentation: \(error.localizedDescription)"
             }
