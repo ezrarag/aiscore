@@ -31,5 +31,7 @@
 	<string>Record audio for video provocations.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Select visual art to use as a studio background.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Score uses Keynote automation to create and sync presentation slides directly with Apple Keynote.</string>
 </dict>
 </plist>
