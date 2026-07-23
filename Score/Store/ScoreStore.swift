@@ -1433,9 +1433,34 @@ final class KeynoteSyncService: ObservableObject {
             tell front document
                 repeat with i from 1 to count of slides
                     set s to slide i
-                    set t to title of s
-                    set b to body text of s
-                    set n to presenter notes of s
+                    set t to ""
+                    set b to ""
+                    set n to ""
+                    
+                    try
+                        set n to presenter notes of s
+                    end try
+                    
+                    try
+                        set t to title of s
+                    on error
+                        try
+                            if (count of text items of s) > 0 then
+                                set t to object text of text item 1 of s
+                            end if
+                        end try
+                    end try
+                    
+                    try
+                        set b to body text of s
+                    on error
+                        try
+                            if (count of text items of s) > 1 then
+                                set b to object text of text item 2 of s
+                            end if
+                        end try
+                    end try
+                    
                     set slideData to slideData & i & "|||" & t & "|||" & b & "|||" & n & "<<<SLIDE_BREAK>>>"
                 end repeat
             end tell
@@ -1443,7 +1468,7 @@ final class KeynoteSyncService: ObservableObject {
         end tell
         """
         
-        guard let output = executeAppleScriptWithOutput(script) else { return [] }
+        guard let output = executeAppleScriptWithOutput(script), !output.isEmpty else { return [] }
         var result: [KeynoteSlideData] = []
         
         let slideBlocks = output.components(separatedBy: "<<<SLIDE_BREAK>>>")
@@ -1473,8 +1498,9 @@ final class KeynoteSyncService: ObservableObject {
         if let scriptObject = NSAppleScript(source: source) {
             let descriptor = scriptObject.executeAndReturnError(&error)
             if let error {
-                print("⚠️ AppleScript Error: \(error)")
-                return false
+                print("⚠️ NSAppleScript Error: \(error)")
+                let processOutput = runOSAScript(source: source)
+                return processOutput != nil
             }
             return descriptor.booleanValue || descriptor.stringValue != nil || error == nil
         }
@@ -1488,10 +1514,35 @@ final class KeynoteSyncService: ObservableObject {
         if let scriptObject = NSAppleScript(source: source) {
             let descriptor = scriptObject.executeAndReturnError(&error)
             if let error {
-                print("⚠️ AppleScript Error: \(error)")
-                return nil
+                print("⚠️ NSAppleScript Error: \(error)")
+                return runOSAScript(source: source)
             }
-            return descriptor.stringValue
+            let val = descriptor.stringValue ?? ""
+            return val.isEmpty ? runOSAScript(source: source) : val
+        }
+        return runOSAScript(source: source)
+        #else
+        return nil
+        #endif
+    }
+    
+    private func runOSAScript(source: String) -> String? {
+        #if os(macOS)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", source]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        
+        do {
+            try process.run()
+            process.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            if let str = String(data: data, encoding: .utf8), !str.isEmpty {
+                return str.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        } catch {
+            print("⚠️ osascript Process Error: \(error)")
         }
         #endif
         return nil
