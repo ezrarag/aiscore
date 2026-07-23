@@ -1311,6 +1311,12 @@ final class KeynoteSyncService: ObservableObject {
         #if os(macOS)
         let cleanTheme = themeName.replacingOccurrences(of: "\"", with: "")
         
+        var allSlides: [SlideContent] = []
+        for block in score.blocks {
+            allSlides.append(contentsOf: block.slides)
+        }
+        guard !allSlides.isEmpty else { return false }
+        
         for appName in targetAppNames {
             var scriptSource = """
             tell application "\(appName)"
@@ -1326,55 +1332,57 @@ final class KeynoteSyncService: ObservableObject {
                 
                 if doc is not missing value then
                     tell doc
-                        try
-                            delete slide 1
-                        end try
             """
             
-            for block in score.blocks {
-                for slide in block.slides {
-                    let cleanTitle = escapeAppleScriptString(slide.title)
-                    let cleanBody = escapeAppleScriptString(slide.bodyText)
-                    let cleanNotes = escapeAppleScriptString(slide.notes)
-                    let question = escapeAppleScriptString(slide.liveQuestion ?? "")
-                    
-                    var fullNotes = cleanNotes
-                    if !question.isEmpty {
-                        fullNotes += "\\n\\n[LIVE PROVOCATION]: " + question
-                    }
-                    
+            for (index, slide) in allSlides.enumerated() {
+                let cleanTitle = escapeAppleScriptString(slide.title)
+                let cleanBody = escapeAppleScriptString(slide.bodyText)
+                let cleanNotes = escapeAppleScriptString(slide.notes)
+                let question = escapeAppleScriptString(slide.liveQuestion ?? "")
+                
+                var fullNotes = cleanNotes
+                if !question.isEmpty {
+                    fullNotes += "\\n\\n[LIVE PROVOCATION]: " + question
+                }
+                
+                if index == 0 {
                     scriptSource += """
                     
-                    set currentSlide to missing value
-                    try
-                        set currentSlide to make new slide at end of slides
-                    end try
+                    set currentSlide to slide 1
+                    """
+                } else {
+                    scriptSource += """
                     
-                    if currentSlide is not missing value then
-                        tell currentSlide
-                            try
-                                set presenter notes to "\(fullNotes)"
-                            end try
-                            try
-                                set textList to object text of every text item
-                                if (count of textList) > 0 then
-                                    set object text of text item 1 to "\(cleanTitle)"
-                                end if
-                                if (count of textList) > 1 then
-                                    set object text of text item 2 to "\(cleanBody)"
-                                end if
-                            on error
-                                try
-                                    set title to "\(cleanTitle)"
-                                end try
-                                try
-                                    set body to "\(cleanBody)"
-                                end try
-                            end try
-                        end tell
-                    end if
+                    set currentSlide to make new slide at end of slides
                     """
                 }
+                
+                scriptSource += """
+                
+                if currentSlide is not missing value then
+                    tell currentSlide
+                        try
+                            set presenter notes to "\(fullNotes)"
+                        end try
+                        try
+                            set textList to object text of every text item
+                            if (count of textList) > 0 then
+                                set object text of text item 1 to "\(cleanTitle)"
+                            end if
+                            if (count of textList) > 1 then
+                                set object text of text item 2 to "\(cleanBody)"
+                            end if
+                        on error
+                            try
+                                set title to "\(cleanTitle)"
+                            end try
+                            try
+                                set body to "\(cleanBody)"
+                            end try
+                        end try
+                    end tell
+                end if
+                """
             }
             
             scriptSource += """
