@@ -1442,23 +1442,13 @@ final class KeynoteSyncService: ObservableObject {
                     end try
                     
                     try
-                        set t to title of s
-                    on error
-                        try
-                            if (count of text items of s) > 0 then
-                                set t to object text of text item 1 of s
-                            end if
-                        end try
-                    end try
-                    
-                    try
-                        set b to body text of s
-                    on error
-                        try
-                            if (count of text items of s) > 1 then
-                                set b to object text of text item 2 of s
-                            end if
-                        end try
+                        set textList to object text of every text item of s
+                        if (count of textList) > 0 then
+                            set t to item 1 of textList
+                        end if
+                        if (count of textList) > 1 then
+                            set b to item 2 of textList
+                        end if
                     end try
                     
                     set slideData to slideData & i & "|||" & t & "|||" & b & "|||" & n & "<<<SLIDE_BREAK>>>"
