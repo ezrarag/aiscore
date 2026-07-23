@@ -934,20 +934,20 @@ struct KeynoteThemePickerSheet: View {
     @State private var isGenerating = false
     
     let presets = [
-        ("Black", "🖤 Dark Studio", "Sleek dark background with white typography"),
-        ("Editorial", "📄 Editorial Serif", "Serif typography for literary and design presentations"),
-        ("Minimalist", "🎨 Minimalist", "Clean fine-line layout with subtle accents"),
-        ("Bold", "⚡️ High Contrast Bold", "Vibrant colors for high engagement"),
-        ("White", "🤍 Standard White", "Classic clean white presentation template")
+        ("Black", "🖤 Dark Studio", "Sleek dark background with vibrant cyan typography"),
+        ("Editorial", "📄 Editorial Serif", "Classic serif typography with warm paper tones"),
+        ("Minimalist", "🎨 Minimalist", "Clean fine-line layout with subtle monochrome accents"),
+        ("Bold", "⚡️ High Contrast Bold", "Vibrant electric gradients for high engagement"),
+        ("White", "🤍 Standard White", "Classic clean light presentation template")
     ]
     
     var body: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 18) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Select Keynote Theme")
-                        .font(.headline)
-                    Text("Choose a built-in or custom theme template for Apple Keynote.")
+                        .font(.title3.bold())
+                    Text("Preview themes and select your Keynote presentation template.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -958,47 +958,38 @@ struct KeynoteThemePickerSheet: View {
             
             Divider()
             
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Popular Keynote Themes")
-                    .font(.caption.bold())
-                    .foregroundStyle(.secondary)
-                
-                ForEach(presets, id: \.0) { key, label, desc in
-                    Button {
-                        selectedTheme = key
-                        customThemeName = ""
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(label)
-                                    .font(.body.bold())
-                                    .foregroundStyle(.primary)
-                                Text(desc)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            if selectedTheme == key && customThemeName.isEmpty {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundStyle(.purple)
-                                    .font(.title3)
-                            }
-                        }
-                        .padding(12)
-                        .background(selectedTheme == key && customThemeName.isEmpty ? Color.purple.opacity(0.12) : Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
-                    }
-                    .buttonStyle(.plain)
-                }
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Custom / Premium Theme Name")
-                        .font(.caption2.bold())
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("Theme Presets Preview")
+                        .font(.caption.bold())
                         .foregroundStyle(.secondary)
-                    TextField("e.g. MyCustomTheme.kth", text: $customThemeName)
-                        .textFieldStyle(.roundedBorder)
+                    
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
+                        ForEach(presets, id: \.0) { key, label, desc in
+                            ThemePreviewCard(
+                                key: key,
+                                label: label,
+                                desc: desc,
+                                isSelected: selectedTheme == key && customThemeName.isEmpty,
+                                action: {
+                                    selectedTheme = key
+                                    customThemeName = ""
+                                }
+                            )
+                        }
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Custom / Premium Theme Template Name")
+                            .font(.caption2.bold())
+                            .foregroundStyle(.secondary)
+                        TextField("e.g. MyCustomTheme.kth", text: $customThemeName)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                    .padding(.top, 8)
                 }
-                .padding(.top, 4)
             }
+            .frame(maxHeight: 380)
             
             Divider()
             
@@ -1024,7 +1015,153 @@ struct KeynoteThemePickerSheet: View {
             }
         }
         .padding(24)
-        .frame(width: 480)
+        .frame(width: 580, height: 550)
+    }
+}
+
+struct ThemePreviewCard: View {
+    let key: String
+    let label: String
+    let desc: String
+    let isSelected: Bool
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 8) {
+                ZStack {
+                    slidePreviewBackground(for: key)
+                    
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("SLIDE 1")
+                                .font(.system(size: 7, weight: .bold))
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(badgeColor(for: key), in: Capsule())
+                                .foregroundStyle(badgeTextColor(for: key))
+                            Spacer()
+                            Image(systemName: "square.stack")
+                                .font(.system(size: 9))
+                                .foregroundStyle(secondaryTextColor(for: key))
+                        }
+                        
+                        Text("Thinking With AI")
+                            .font(titleFont(for: key))
+                            .foregroundStyle(primaryTextColor(for: key))
+                            .lineLimit(1)
+                        
+                        Rectangle()
+                            .fill(accentLineColor(for: key))
+                            .frame(height: 1.5)
+                        
+                        Text("A high-fidelity score layout for creative studio practice...")
+                            .font(.system(size: 7))
+                            .foregroundStyle(secondaryTextColor(for: key))
+                            .lineLimit(2)
+                    }
+                    .padding(10)
+                }
+                .frame(height: 95)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(isSelected ? Color.purple : Color.white.opacity(0.15), lineWidth: isSelected ? 2.5 : 1)
+                )
+                
+                HStack {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(label)
+                            .font(.caption.bold())
+                            .foregroundStyle(.primary)
+                        Text(desc)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    if isSelected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.purple)
+                            .font(.subheadline)
+                    }
+                }
+            }
+            .padding(10)
+            .background(isSelected ? Color.purple.opacity(0.1) : Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+    }
+    
+    @ViewBuilder
+    private func slidePreviewBackground(for key: String) -> some View {
+        switch key {
+        case "Black":
+            Color(red: 0.08, green: 0.08, blue: 0.11)
+        case "Editorial":
+            Color(red: 0.97, green: 0.95, blue: 0.92)
+        case "Minimalist":
+            Color.white
+        case "Bold":
+            LinearGradient(colors: [Color(red: 0.20, green: 0.05, blue: 0.35), Color(red: 0.05, green: 0.10, blue: 0.35)], startPoint: .topLeading, endPoint: .bottomTrailing)
+        default:
+            Color(red: 0.96, green: 0.97, blue: 0.98)
+        }
+    }
+    
+    private func primaryTextColor(for key: String) -> Color {
+        switch key {
+        case "Black", "Bold": return .white
+        case "Editorial": return Color(red: 0.2, green: 0.18, blue: 0.15)
+        default: return .black
+        }
+    }
+    
+    private func secondaryTextColor(for key: String) -> Color {
+        switch key {
+        case "Black", "Bold": return .white.opacity(0.65)
+        case "Editorial": return Color(red: 0.45, green: 0.40, blue: 0.35)
+        default: return .secondary
+        }
+    }
+    
+    private func badgeColor(for key: String) -> Color {
+        switch key {
+        case "Black": return .cyan.opacity(0.25)
+        case "Editorial": return Color.orange.opacity(0.2)
+        case "Minimalist": return Color.gray.opacity(0.2)
+        case "Bold": return Color.pink.opacity(0.3)
+        default: return Color.blue.opacity(0.2)
+        }
+    }
+    
+    private func badgeTextColor(for key: String) -> Color {
+        switch key {
+        case "Black": return .cyan
+        case "Editorial": return Color.orange
+        case "Minimalist": return .primary
+        case "Bold": return .pink
+        default: return .blue
+        }
+    }
+    
+    private func accentLineColor(for key: String) -> Color {
+        switch key {
+        case "Black": return .cyan
+        case "Editorial": return Color(red: 0.7, green: 0.4, blue: 0.3)
+        case "Minimalist": return .gray.opacity(0.3)
+        case "Bold": return .purple
+        default: return .blue
+        }
+    }
+    
+    private func titleFont(for key: String) -> Font {
+        switch key {
+        case "Editorial": return .system(size: 10, weight: .semibold, design: .serif)
+        case "Minimalist": return .system(size: 10, weight: .light, design: .monospaced)
+        case "Bold": return .system(size: 11, weight: .black, design: .default)
+        default: return .system(size: 10, weight: .bold, design: .default)
+        }
     }
 }
 
