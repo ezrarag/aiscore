@@ -1306,10 +1306,18 @@ final class KeynoteSyncService: ObservableObject {
     
     private init() {}
     
+    private var appName: String {
+        let apps = NSWorkspace.shared.runningApplications
+        if apps.contains(where: { $0.localizedName == "Keynote Creator Studio" }) {
+            return "Keynote Creator Studio"
+        }
+        return "Keynote"
+    }
+    
     func checkKeynoteStatus() -> Bool {
         #if os(macOS)
         let apps = NSWorkspace.shared.runningApplications
-        let running = apps.contains { $0.bundleIdentifier == "com.apple.iWork.Keynote" }
+        let running = apps.contains { $0.bundleIdentifier == "com.apple.iWork.Keynote" || $0.localizedName == "Keynote Creator Studio" || $0.localizedName == "Keynote" }
         self.isKeynoteRunning = running
         return running
         #else
@@ -1317,12 +1325,13 @@ final class KeynoteSyncService: ObservableObject {
         #endif
     }
     
-    func createPresentationInKeynote(score: StudioScore, themeName: String = "Black") async -> Bool {
+    func createPresentationInKeynote(score: StudioScore, themeName: String = "Basic Black") async -> Bool {
         #if os(macOS)
         let cleanTheme = themeName.replacingOccurrences(of: "\"", with: "")
+        let targetApp = appName
         
         var scriptSource = """
-        tell application "Keynote"
+        tell application "\(targetApp)"
             activate
             set doc to missing value
             try
@@ -1356,23 +1365,29 @@ final class KeynoteSyncService: ObservableObject {
                 
                 set currentSlide to missing value
                 try
-                    set currentSlide to make new slide at end of slides with properties {slide layout:slide layout "Title & Subtitle"}
-                on error
-                    try
-                        set currentSlide to make new slide at end of slides
-                    end try
+                    set currentSlide to make new slide at end of slides
                 end try
                 
                 if currentSlide is not missing value then
                     tell currentSlide
                         try
-                            set title to "\(cleanTitle)"
-                        end try
-                        try
-                            set body to "\(cleanBody)"
-                        end try
-                        try
                             set presenter notes to "\(fullNotes)"
+                        end try
+                        try
+                            set textList to object text of every text item
+                            if (count of textList) > 0 then
+                                set object text of text item 1 to "\(cleanTitle)"
+                            end if
+                            if (count of textList) > 1 then
+                                set object text of text item 2 to "\(cleanBody)"
+                            end if
+                        on error
+                            try
+                                set title to "\(cleanTitle)"
+                            end try
+                            try
+                                set body to "\(cleanBody)"
+                            end try
                         end try
                     end tell
                 end if
@@ -1396,8 +1411,9 @@ final class KeynoteSyncService: ObservableObject {
     
     func jumpToSlideInKeynote(slideIndex: Int) {
         #if os(macOS)
+        let targetApp = appName
         let script = """
-        tell application "Keynote"
+        tell application "\(targetApp)"
             if (count of documents) > 0 then
                 tell front document
                     if slideIndex <= (count of slides) then
@@ -1420,8 +1436,9 @@ final class KeynoteSyncService: ObservableObject {
     
     func pullSlidesFromKeynote() -> [KeynoteSlideData] {
         #if os(macOS)
+        let targetApp = appName
         let script = """
-        tell application "Keynote"
+        tell application "\(targetApp)"
             if (count of documents) is 0 then return ""
             set slideData to ""
             tell front document
