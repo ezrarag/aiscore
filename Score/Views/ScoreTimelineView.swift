@@ -76,11 +76,16 @@ struct ScoreTimelineView: View {
                     }
                     
                     HStack(spacing: 10) {
-                        Button("Open in Keynote App", systemImage: "play.desktopcomputer") {
-                            showKeynoteThemePicker = true
+                        Button("Open in Keynote (Current State)", systemImage: "play.desktopcomputer") {
+                            Task { await store.createLiveKeynote(themeName: "Basic Black") }
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(.purple)
+                        
+                        Button("Choose Theme...", systemImage: "paintbrush") {
+                            showKeynoteThemePicker = true
+                        }
+                        .buttonStyle(.bordered)
                         
                         Button("Sync from Keynote", systemImage: "arrow.triangle.2.circlepath") {
                             store.pullFromKeynote()
@@ -940,11 +945,14 @@ struct KeynoteThemePickerSheet: View {
     @State private var isGenerating = false
     
     enum ThemeCategory: String, CaseIterable, Identifiable {
-        case featured = "🌟 Featured"
-        case academic = "🎓 Academic"
-        case portfolio = "💼 Portfolio"
-        case bold = "⚡️ Bold"
-        case corporate = "🏛 Corporate"
+        case featured = "🌟 AIScore Default"
+        case basic = "⚪️ Basic & Minimal"
+        case dynamic = "🌈 Dynamic"
+        case academic = "🎓 Academic & School"
+        case editorial = "📜 Editorial & Craft"
+        case portfolio = "💼 Portfolio & Art"
+        case bold = "⚡️ Bold & Cyber"
+        case corporate = "🏢 Briefing & Slate"
         case custom = "💎 Custom Template"
         var id: String { rawValue }
     }
@@ -957,35 +965,69 @@ struct KeynoteThemePickerSheet: View {
     }
     
     let allThemes: [ThemeInfo] = [
-        // Featured
-        ThemeInfo(key: "Black", label: "🖤 Dark Studio", desc: "Sleek dark background with vibrant cyan typography", category: .featured),
-        ThemeInfo(key: "Editorial", label: "📄 Editorial Serif", desc: "Classic serif typography with warm paper tones", category: .featured),
-        ThemeInfo(key: "Minimalist", label: "🎨 Minimalist", desc: "Clean fine-line layout with subtle monochrome accents", category: .featured),
-        ThemeInfo(key: "White", label: "🤍 Standard White", desc: "Classic clean light presentation template", category: .featured),
+        // AIScore Default / Current State
+        ThemeInfo(key: "Basic Black", label: "🖤 AIScore Default Dark", desc: "Current AIScore studio dark theme layout", category: .featured),
+        ThemeInfo(key: "Basic White", label: "🤍 AIScore Default Light", desc: "Current AIScore studio light theme layout", category: .featured),
+        ThemeInfo(key: "Editorial", label: "📄 Editorial Classic", desc: "Serif typography for literary and design score presentations", category: .featured),
+        ThemeInfo(key: "Standard Minimalist", label: "🎨 Minimalist", desc: "Clean fine-line layout with subtle monochrome accents", category: .featured),
         
-        // Academic
-        ThemeInfo(key: "Academic Paper", label: "📜 Academic Monograph", desc: "Formal serif layout for scholarly lectures & research", category: .academic),
-        ThemeInfo(key: "Classic", label: "🎓 Classic Lecture", desc: "Traditional dark slate layout with gold accents", category: .academic),
-        ThemeInfo(key: "Chalkboard", label: "✏️ Studio Chalkboard", desc: "Textured dark chalkboard layout for active brainstorming", category: .academic),
-        ThemeInfo(key: "Technical Report", label: "🔬 Technical Report", desc: "Grid-focused layout for diagrams & data sets", category: .academic),
+        // Basic & Minimal
+        ThemeInfo(key: "Basic Black", label: "Basic Black", desc: "Clean dark background with high-contrast text", category: .basic),
+        ThemeInfo(key: "Basic White", label: "Basic White", desc: "Clean white background with dark typography", category: .basic),
+        ThemeInfo(key: "Classic White", label: "Classic White", desc: "Traditional clean white slide layout", category: .basic),
+        ThemeInfo(key: "Standard Minimalist", label: "Standard Minimalist", desc: "Minimalist fine lines with subtle accents", category: .basic),
+        ThemeInfo(key: "Minimalist Light", label: "Minimalist Light", desc: "Light tone minimalist aesthetic", category: .basic),
+        ThemeInfo(key: "Minimalist Dark", label: "Minimalist Dark", desc: "Dark tone minimalist aesthetic", category: .basic),
         
-        // Portfolio
-        ThemeInfo(key: "Modern Portfolio", label: "📷 Modern Portfolio", desc: "High-contrast visual frames for artwork & design work", category: .portfolio),
-        ThemeInfo(key: "Photo Essay", label: "🖼 Photo Essay", desc: "Full-bleed layout for high-res imagery & media", category: .portfolio),
-        ThemeInfo(key: "Gallery Showcase", label: "🏛 Gallery Showcase", desc: "Clean museum wall aesthetic for exhibit presentations", category: .portfolio),
-        ThemeInfo(key: "Art Monograph", label: "🎨 Art Monograph", desc: "Minimalist layout with oversized typography for critiques", category: .portfolio),
+        // Dynamic
+        ThemeInfo(key: "Dynamic Color", label: "Dynamic Color", desc: "Dynamic color shifts for engaging talks", category: .dynamic),
+        ThemeInfo(key: "Dynamic Waves Light", label: "Dynamic Waves Light", desc: "Animated light wave background gradients", category: .dynamic),
+        ThemeInfo(key: "Dynamic Waves Dark", label: "Dynamic Waves Dark", desc: "Animated dark wave background gradients", category: .dynamic),
+        ThemeInfo(key: "Dynamic Clouds Light", label: "Dynamic Clouds Light", desc: "Soft cloud color motion background", category: .dynamic),
+        ThemeInfo(key: "Dynamic Clouds Dark", label: "Dynamic Clouds Dark", desc: "Moody dark cloud motion background", category: .dynamic),
+        ThemeInfo(key: "Dynamic Rainbow", label: "Dynamic Rainbow", desc: "Vibrant spectrum motion gradient", category: .dynamic),
+        ThemeInfo(key: "Dynamic Chill", label: "Dynamic Chill", desc: "Cool serene color transitions", category: .dynamic),
         
-        // Bold
-        ThemeInfo(key: "Bold", label: "⚡️ High Contrast Bold", desc: "Vibrant electric gradients for high engagement", category: .bold),
-        ThemeInfo(key: "Neon Cyber", label: "🟣 Neon Cyber", desc: "Deep dark canvas with electric magenta & violet accents", category: .bold),
-        ThemeInfo(key: "Vibrant Gradient", label: "🌈 Vibrant Gradient", desc: "Dynamic color shifts for speculative design talks", category: .bold),
-        ThemeInfo(key: "Typographic", label: "🔤 Typographic Hero", desc: "Oversized bold lettering for impactful statements", category: .bold),
+        // Academic & School
+        ThemeInfo(key: "Academic Modern", label: "Academic Modern", desc: "Modern layout for research & university lectures", category: .academic),
+        ThemeInfo(key: "University Classic", label: "University Classic", desc: "Traditional academic layout with gold accents", category: .academic),
+        ThemeInfo(key: "School Simple", label: "School Simple", desc: "Clean layout for course modules & syllabi", category: .academic),
+        ThemeInfo(key: "Educator Playful", label: "Educator Playful", desc: "Vibrant engaging layout for active workshops", category: .academic),
+        ThemeInfo(key: "Scientific Muted", label: "Scientific Muted", desc: "Muted palette for data sets & scientific diagrams", category: .academic),
+        ThemeInfo(key: "Chalkboard", label: "Chalkboard", desc: "Dark chalkboard aesthetic for studio brainstorming", category: .academic),
+        ThemeInfo(key: "Academy", label: "Academy", desc: "Formal lecture slide deck template", category: .academic),
         
-        // Corporate
-        ThemeInfo(key: "Slate Executive", label: "🏢 Slate Executive", desc: "Refined slate blue palette for formal briefings", category: .corporate),
-        ThemeInfo(key: "Navy Grid", label: "⚓️ Navy Executive", desc: "Professional navy blue layout with crisp white typography", category: .corporate),
-        ThemeInfo(key: "Onyx Pro", label: "⚫️ Onyx Pro", desc: "Ultra-dark luxury aesthetic with silver lines", category: .corporate),
-        ThemeInfo(key: "Monochrome Minimal", label: "⚪️ Monochrome Grid", desc: "Strict black & white grid layout for structured agendas", category: .corporate)
+        // Editorial & Craft
+        ThemeInfo(key: "Editorial", label: "Editorial", desc: "Classic magazine serif layout with warm tones", category: .editorial),
+        ThemeInfo(key: "Editorial Colorful", label: "Editorial Colorful", desc: "Vibrant editorial accent blocks", category: .editorial),
+        ThemeInfo(key: "Journalism Simple", label: "Journalism Simple", desc: "News & publication layout structure", category: .editorial),
+        ThemeInfo(key: "Cream Paper", label: "Cream Paper", desc: "Warm textured paper aesthetic", category: .editorial),
+        ThemeInfo(key: "Typeset", label: "Typeset", desc: "Emphasis on bold typographic hierarchy", category: .editorial),
+        ThemeInfo(key: "Craft", label: "Craft", desc: "Handcrafted studio aesthetic with warm borders", category: .editorial),
+        ThemeInfo(key: "Parchment", label: "Parchment", desc: "Historical document & archive aesthetic", category: .editorial),
+        
+        // Portfolio & Art
+        ThemeInfo(key: "Modern Portfolio", label: "Modern Portfolio", desc: "High-contrast frames for visual artwork", category: .portfolio),
+        ThemeInfo(key: "Photo Essay", label: "Photo Essay", desc: "Full-bleed imagery & media presentation", category: .portfolio),
+        ThemeInfo(key: "Showcase", label: "Showcase", desc: "Gallery wall presentation structure", category: .portfolio),
+        ThemeInfo(key: "Look Book", label: "Look Book", desc: "Fashion & design portfolio layout", category: .portfolio),
+        ThemeInfo(key: "Exhibition", label: "Exhibition", desc: "Museum & gallery exhibit aesthetic", category: .portfolio),
+        ThemeInfo(key: "Photo Portfolio", label: "Photo Portfolio", desc: "Visual photography showcase layout", category: .portfolio),
+        ThemeInfo(key: "Artisan", label: "Artisan", desc: "Textured artisan studio deck", category: .portfolio),
+        
+        // Bold & Cyber
+        ThemeInfo(key: "Sales Bold", label: "Sales Bold", desc: "High-energy bold title slides", category: .bold),
+        ThemeInfo(key: "Cyber Stark", label: "Cyber Stark", desc: "Dark cybernetic contrast with neon accents", category: .bold),
+        ThemeInfo(key: "Purple Tropics", label: "Purple Tropics", desc: "Vibrant violet & neon purple palette", category: .bold),
+        ThemeInfo(key: "Bold Color", label: "Bold Color", desc: "High-impact solid color slide backgrounds", category: .bold),
+        ThemeInfo(key: "Gradient Colorful", label: "Gradient Colorful", desc: "Multi-color gradient shifts", category: .bold),
+        
+        // Corporate & Briefing
+        ThemeInfo(key: "Briefing", label: "Briefing", desc: "Crisp executive briefing deck layout", category: .corporate),
+        ThemeInfo(key: "Slate", label: "Slate", desc: "Refined slate blue executive palette", category: .corporate),
+        ThemeInfo(key: "Branding Modern", label: "Branding Modern", desc: "Corporate brand guidelines layout", category: .corporate),
+        ThemeInfo(key: "Business Modern", label: "Business Modern", desc: "Modern business presentation layout", category: .corporate),
+        ThemeInfo(key: "Startup Simple", label: "Startup Simple", desc: "Clean pitch deck structure for new ideas", category: .corporate)
     ]
     
     var filteredThemes: [ThemeInfo] {
