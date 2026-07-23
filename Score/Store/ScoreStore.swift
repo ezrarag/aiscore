@@ -1489,15 +1489,16 @@ final class KeynoteSyncService: ObservableObject {
         var error: NSDictionary?
         if let scriptObject = NSAppleScript(source: source) {
             let descriptor = scriptObject.executeAndReturnError(&error)
-            if let error {
-                print("⚠️ NSAppleScript Error: \(error)")
-                let processOutput = runOSAScript(source: source)
-                return processOutput != nil
+            if error == nil {
+                return descriptor.booleanValue || descriptor.stringValue != nil || true
+            } else {
+                print("⚠️ NSAppleScript Error: \(String(describing: error)) — attempting osascript process fallback")
             }
-            return descriptor.booleanValue || descriptor.stringValue != nil || error == nil
         }
-        #endif
+        return runOSAScript(source: source) != nil
+        #else
         return false
+        #endif
     }
     
     private func executeAppleScriptWithOutput(_ source: String) -> String? {
@@ -1505,12 +1506,9 @@ final class KeynoteSyncService: ObservableObject {
         var error: NSDictionary?
         if let scriptObject = NSAppleScript(source: source) {
             let descriptor = scriptObject.executeAndReturnError(&error)
-            if let error {
-                print("⚠️ NSAppleScript Error: \(error)")
-                return runOSAScript(source: source)
+            if error == nil, let val = descriptor.stringValue, !val.isEmpty {
+                return val
             }
-            let val = descriptor.stringValue ?? ""
-            return val.isEmpty ? runOSAScript(source: source) : val
         }
         return runOSAScript(source: source)
         #else
@@ -1529,9 +1527,12 @@ final class KeynoteSyncService: ObservableObject {
         do {
             try process.run()
             process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            if let str = String(data: data, encoding: .utf8), !str.isEmpty {
-                return str.trimmingCharacters(in: .whitespacesAndNewlines)
+            if process.terminationStatus == 0 {
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let str = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                return str.isEmpty ? "SUCCESS" : str
+            } else {
+                print("⚠️ osascript exit status: \(process.terminationStatus)")
             }
         } catch {
             print("⚠️ osascript Process Error: \(error)")
