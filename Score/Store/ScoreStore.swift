@@ -995,6 +995,7 @@ final class ScoreStore {
         }
         
         var updatedCount = 0
+        let scoreID = scores[activeScoreIndex].id
         for kSlide in keynoteSlides {
             let targetIdx = kSlide.index - 1
             if targetIdx < flatSlideRefs.count {
@@ -1007,6 +1008,18 @@ final class ScoreStore {
                 }
                 if !kSlide.notes.isEmpty {
                     scores[activeScoreIndex].blocks[ref.blockIndex].slides[ref.slideIndex].notes = kSlide.notes
+                }
+                
+                let slideID = scores[activeScoreIndex].blocks[ref.blockIndex].slides[ref.slideIndex].id
+                let importedImages = kSlide.images.compactMap {
+                    KeynoteSyncService.shared.importImageAsset($0, scoreID: scoreID, slideID: slideID)
+                }
+                if !importedImages.isEmpty {
+                    scores[activeScoreIndex].blocks[ref.blockIndex].slides[ref.slideIndex].mediaItems = importedImages
+                    if let firstImage = importedImages.first {
+                        scores[activeScoreIndex].blocks[ref.blockIndex].slides[ref.slideIndex].mediaURL = firstImage.url
+                        scores[activeScoreIndex].blocks[ref.blockIndex].slides[ref.slideIndex].mediaType = .image
+                    }
                 }
                 updatedCount += 1
             }

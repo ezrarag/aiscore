@@ -96,6 +96,12 @@ struct InstructorStudioView: View {
             .onAppear {
                 if selectedSidebarItem == nil, let firstWeek = store.scores.first {
                     selectedSidebarItem = .week(firstWeek.id)
+                    store.activeScoreID = firstWeek.id
+                }
+            }
+            .onChange(of: selectedSidebarItem) { _, newItem in
+                if case .week(let id) = newItem {
+                    store.activeScoreID = id
                 }
             }
             .onChange(of: store.slideImportStatus) { _, status in
