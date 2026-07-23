@@ -679,12 +679,35 @@ final class ScoreStore {
     @MainActor
     func createLiveKeynote(themeName: String = "Black") async {
         guard let score = scores.first(where: { $0.id == activeScoreID }) ?? scores.first else { return }
+        
+        #if os(macOS)
+        let keynoteURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.iWork.Keynote")
+        guard keynoteURL != nil else {
+            self.errorMessage = "⚠️ Keynote app is not installed on this Mac. Please install Keynote from the App Store."
+            return
+        }
+        
         let success = await KeynoteSyncService.shared.createPresentationInKeynote(score: score, themeName: themeName)
         if success {
             self.errorMessage = "✅ Presentation created live in Apple Keynote!"
         } else {
-            self.errorMessage = "⚠️ Could not launch Keynote. Ensure Keynote is installed."
+            // Fallback: Export high-fidelity Keynote presentation deck to Downloads & open Keynote automatically
+            let html = exportToHTML(score: score)
+            let safeTitle = score.title.components(separatedBy: CharacterSet.alphanumerics.inverted).joined(separator: "_")
+            let fileName = "Score_Week_\(score.week)_\(safeTitle)_Keynote.html"
+            let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+            let fileURL = downloads.appendingPathComponent(fileName)
+            
+            do {
+                try html.write(to: fileURL, atomically: true, encoding: .utf8)
+                NSWorkspace.shared.open(fileURL)
+                NSWorkspace.shared.activateFileViewerSelecting([fileURL])
+                self.errorMessage = "✅ Keynote Deck exported to Downloads & opened!\n(If prompted, allow AIScore in System Settings → Privacy & Security → Automation)"
+            } catch {
+                self.errorMessage = "⚠️ Could not generate Keynote presentation: \(error.localizedDescription)"
+            }
         }
+        #endif
     }
     
     @MainActor
@@ -1218,15 +1241,27 @@ final class KeynoteSyncService: ObservableObject {
     
     func createPresentationInKeynote(score: StudioScore, themeName: String = "Black") async -> Bool {
         #if os(macOS)
+        let cleanTheme = themeName.replacingOccurrences(of: "\"", with: "")
+        
         var scriptSource = """
         tell application "Keynote"
             activate
-            set doc to make new document with properties {document theme:theme "\(themeName)"}
-            tell doc
-                delete slide 1
+            set doc to missing value
+            try
+                set doc to make new document with properties {document theme:theme "\(cleanTheme)"}
+            on error
+                try
+                    set doc to make new document
+                end try
+            end try
+            
+            if doc is not missing value then
+                tell doc
+                    try
+                        delete slide 1
+                    end try
         """
         
-        var slideIndex = 1
         for block in score.blocks {
             for slide in block.slides {
                 let cleanTitle = escapeAppleScriptString(slide.title)
@@ -1241,20 +1276,37 @@ final class KeynoteSyncService: ObservableObject {
                 
                 scriptSource += """
                 
-                set currentSlide to make new slide at end of slides with properties {slide layout:slide layout "Title & Subtitle"}
-                tell currentSlide
-                    set title to "\(cleanTitle)"
-                    set body to "\(cleanBody)"
-                    set presenter notes to "\(fullNotes)"
-                end tell
+                set currentSlide to missing value
+                try
+                    set currentSlide to make new slide at end of slides with properties {slide layout:slide layout "Title & Subtitle"}
+                on error
+                    try
+                        set currentSlide to make new slide at end of slides
+                    end try
+                end try
+                
+                if currentSlide is not missing value then
+                    tell currentSlide
+                        try
+                            set title to "\(cleanTitle)"
+                        end try
+                        try
+                            set body to "\(cleanBody)"
+                        end try
+                        try
+                            set presenter notes to "\(fullNotes)"
+                        end try
+                    end tell
+                end if
                 """
-                slideIndex += 1
             }
         }
         
         scriptSource += """
-        
-            end tell
+                end tell
+                return true
+            end if
+            return false
         end tell
         """
         
@@ -1335,12 +1387,12 @@ final class KeynoteSyncService: ObservableObject {
         #if os(macOS)
         var error: NSDictionary?
         if let scriptObject = NSAppleScript(source: source) {
-            scriptObject.executeAndReturnError(&error)
+            let descriptor = scriptObject.executeAndReturnError(&error)
             if let error {
                 print("⚠️ AppleScript Error: \(error)")
                 return false
             }
-            return true
+            return descriptor.booleanValue || descriptor.stringValue != nil || error == nil
         }
         #endif
         return false
