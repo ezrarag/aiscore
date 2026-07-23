@@ -672,6 +672,55 @@ final class ScoreStore {
         persistence.save(constitution, to: "constitution.json")
     }
 
+    // MARK: - Keynote Direct Automation & Two-Way Sync
+    @MainActor
+    func createLiveKeynote(themeName: String = "Black") async {
+        guard let score = scores.first(where: { $0.id == activeScoreID }) ?? scores.first else { return }
+        let success = await KeynoteSyncService.shared.createPresentationInKeynote(score: score, themeName: themeName)
+        if success {
+            self.errorMessage = "✅ Presentation created live in Apple Keynote!"
+        } else {
+            self.errorMessage = "⚠️ Could not launch Keynote. Ensure Keynote is installed."
+        }
+    }
+    
+    @MainActor
+    func pullFromKeynote() {
+        guard let activeScoreIndex = scores.firstIndex(where: { $0.id == activeScoreID }) else { return }
+        let keynoteSlides = KeynoteSyncService.shared.pullSlidesFromKeynote()
+        guard !keynoteSlides.isEmpty else {
+            self.errorMessage = "⚠️ No active document open in Keynote."
+            return
+        }
+        
+        var flatSlideRefs: [(blockIndex: Int, slideIndex: Int)] = []
+        for bIdx in 0..<scores[activeScoreIndex].blocks.count {
+            for sIdx in 0..<scores[activeScoreIndex].blocks[bIdx].slides.count {
+                flatSlideRefs.append((bIdx, sIdx))
+            }
+        }
+        
+        var updatedCount = 0
+        for kSlide in keynoteSlides {
+            let targetIdx = kSlide.index - 1
+            if targetIdx < flatSlideRefs.count {
+                let ref = flatSlideRefs[targetIdx]
+                if !kSlide.title.isEmpty {
+                    scores[activeScoreIndex].blocks[ref.blockIndex].slides[ref.slideIndex].title = kSlide.title
+                }
+                if !kSlide.body.isEmpty {
+                    scores[activeScoreIndex].blocks[ref.blockIndex].slides[ref.slideIndex].bodyText = kSlide.body
+                }
+                if !kSlide.notes.isEmpty {
+                    scores[activeScoreIndex].blocks[ref.blockIndex].slides[ref.slideIndex].notes = kSlide.notes
+                }
+                updatedCount += 1
+            }
+        }
+        saveScores()
+        self.errorMessage = "🔄 Synced \(updatedCount) slides from Keynote into AIScore!"
+    }
+
     func exportToHTML(score: StudioScore) -> String {
         var slidesHTML = ""
         var slideIndex = 0
@@ -1141,4 +1190,171 @@ final class ScoreStore {
         else { persistence.remove("account.json") }
     }
     private func saveBackground() { persistence.save(background, to: "background.json") }
+}
+
+@MainActor
+final class KeynoteSyncService: ObservableObject {
+    static let shared = KeynoteSyncService()
+    
+    @Published var isKeynoteRunning: Bool = false
+    @Published var activePresentationName: String? = nil
+    @Published var isAutoSyncEnabled: Bool = false
+    
+    private init() {}
+    
+    func checkKeynoteStatus() -> Bool {
+        #if os(macOS)
+        let apps = NSWorkspace.shared.runningApplications
+        let running = apps.contains { $0.bundleIdentifier == "com.apple.iWork.Keynote" }
+        self.isKeynoteRunning = running
+        return running
+        #else
+        return false
+        #endif
+    }
+    
+    func createPresentationInKeynote(score: StudioScore, themeName: String = "Black") async -> Bool {
+        #if os(macOS)
+        var scriptSource = """
+        tell application "Keynote"
+            activate
+            set doc to make new document with properties {document theme:theme "\(themeName)"}
+            tell doc
+                delete slide 1
+        """
+        
+        var slideIndex = 1
+        for block in score.blocks {
+            for slide in block.slides {
+                let cleanTitle = escapeAppleScriptString(slide.title)
+                let cleanBody = escapeAppleScriptString(slide.bodyText)
+                let cleanNotes = escapeAppleScriptString(slide.notes)
+                let question = escapeAppleScriptString(slide.liveQuestion ?? "")
+                
+                var fullNotes = cleanNotes
+                if !question.isEmpty {
+                    fullNotes += "\\n\\n[LIVE PROVOCATION]: " + question
+                }
+                
+                scriptSource += """
+                
+                set currentSlide to make new slide at end of slides with properties {slide layout:slide layout "Title & Subtitle"}
+                tell currentSlide
+                    set title to "\(cleanTitle)"
+                    set body to "\(cleanBody)"
+                    set presenter notes to "\(fullNotes)"
+                end tell
+                """
+                slideIndex += 1
+            }
+        }
+        
+        scriptSource += """
+        
+            end tell
+        end tell
+        """
+        
+        return executeAppleScript(scriptSource)
+        #else
+        return false
+        #endif
+    }
+    
+    func jumpToSlideInKeynote(slideIndex: Int) {
+        #if os(macOS)
+        let script = """
+        tell application "Keynote"
+            if (count of documents) > 0 then
+                tell front document
+                    if slideIndex <= (count of slides) then
+                        show slide \(slideIndex + 1)
+                    end if
+                end tell
+            end if
+        end tell
+        """
+        _ = executeAppleScript(script)
+        #endif
+    }
+    
+    struct KeynoteSlideData {
+        let index: Int
+        let title: String
+        let body: String
+        let notes: String
+    }
+    
+    func pullSlidesFromKeynote() -> [KeynoteSlideData] {
+        #if os(macOS)
+        let script = """
+        tell application "Keynote"
+            if (count of documents) is 0 then return ""
+            set slideData to ""
+            tell front document
+                repeat with i from 1 to count of slides
+                    set s to slide i
+                    set t to title of s
+                    set b to body text of s
+                    set n to presenter notes of s
+                    set slideData to slideData & i & "|||" & t & "|||" & b & "|||" & n & "<<<SLIDE_BREAK>>>"
+                end repeat
+            end tell
+            return slideData
+        end tell
+        """
+        
+        guard let output = executeAppleScriptWithOutput(script) else { return [] }
+        var result: [KeynoteSlideData] = []
+        
+        let slideBlocks = output.components(separatedBy: "<<<SLIDE_BREAK>>>")
+        for blockStr in slideBlocks where !blockStr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let parts = blockStr.components(separatedBy: "|||")
+            if parts.count >= 4, let idx = Int(parts[0]) {
+                result.append(KeynoteSlideData(index: idx, title: parts[1], body: parts[2], notes: parts[3]))
+            }
+        }
+        return result
+        #else
+        return []
+        #endif
+    }
+    
+    private func escapeAppleScriptString(_ str: String) -> String {
+        return str
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "")
+    }
+    
+    private func executeAppleScript(_ source: String) -> Bool {
+        #if os(macOS)
+        var error: NSDictionary?
+        if let scriptObject = NSAppleScript(source: source) {
+            scriptObject.executeAndReturnError(&error)
+            if let error {
+                print("⚠️ AppleScript Error: \(error)")
+                return false
+            }
+            return true
+        }
+        #endif
+        return false
+    }
+    
+    private func executeAppleScriptWithOutput(_ source: String) -> String? {
+        #if os(macOS)
+        var error: NSDictionary?
+        if let scriptObject = NSAppleScript(source: source) {
+            let descriptor = scriptObject.executeAndReturnError(&error)
+            if let error {
+                print("⚠️ AppleScript Error: \(error)")
+                return nil
+            }
+            return descriptor.stringValue
+        }
+        #endif
+        return nil
+    }
 }

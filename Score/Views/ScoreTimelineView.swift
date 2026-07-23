@@ -74,12 +74,22 @@ struct ScoreTimelineView: View {
                         .buttonStyle(.bordered)
                     }
                     
-                    HStack(spacing: 12) {
-                        Button("Export Keynote Deck", systemImage: "macwindow.and.cursorarrow") {
-                            exportHTMLSlideshow()
+                    HStack(spacing: 10) {
+                        Button("Open in Keynote App", systemImage: "play.desktopcomputer") {
+                            Task { await store.createLiveKeynote() }
                         }
                         .buttonStyle(.borderedProminent)
-                        .tint(.blue)
+                        .tint(.purple)
+                        
+                        Button("Sync from Keynote", systemImage: "arrow.triangle.2.circlepath") {
+                            store.pullFromKeynote()
+                        }
+                        .buttonStyle(.bordered)
+                        
+                        Button("Export Deck File", systemImage: "macwindow.and.cursorarrow") {
+                            exportHTMLSlideshow()
+                        }
+                        .buttonStyle(.bordered)
                         
                         Button("Copy CSV", systemImage: "doc.on.doc") {
                             let csv = store.exportToCSV()
