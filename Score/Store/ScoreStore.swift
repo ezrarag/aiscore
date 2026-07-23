@@ -1,5 +1,8 @@
 import Foundation
 import Observation
+#if os(macOS)
+import AppKit
+#endif
 
 @MainActor @Observable
 final class ScoreStore {
@@ -717,7 +720,7 @@ final class ScoreStore {
                 updatedCount += 1
             }
         }
-        saveScores()
+        scheduleSave()
         self.errorMessage = "🔄 Synced \(updatedCount) slides from Keynote into AIScore!"
     }
 
