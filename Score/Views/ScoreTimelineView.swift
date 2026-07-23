@@ -929,25 +929,71 @@ struct KeynoteThemePickerSheet: View {
     @Environment(ScoreStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     
+    @State private var selectedCategory: ThemeCategory = .featured
     @State private var selectedTheme: String = "Black"
     @State private var customThemeName: String = ""
     @State private var isGenerating = false
     
-    let presets = [
-        ("Black", "🖤 Dark Studio", "Sleek dark background with vibrant cyan typography"),
-        ("Editorial", "📄 Editorial Serif", "Classic serif typography with warm paper tones"),
-        ("Minimalist", "🎨 Minimalist", "Clean fine-line layout with subtle monochrome accents"),
-        ("Bold", "⚡️ High Contrast Bold", "Vibrant electric gradients for high engagement"),
-        ("White", "🤍 Standard White", "Classic clean light presentation template")
+    enum ThemeCategory: String, CaseIterable, Identifiable {
+        case featured = "🌟 Featured"
+        case academic = "🎓 Academic"
+        case portfolio = "💼 Portfolio"
+        case bold = "⚡️ Bold"
+        case corporate = "🏛 Corporate"
+        case custom = "💎 Custom Template"
+        var id: String { rawValue }
+    }
+    
+    struct ThemeInfo {
+        let key: String
+        let label: String
+        let desc: String
+        let category: ThemeCategory
+    }
+    
+    let allThemes: [ThemeInfo] = [
+        // Featured
+        ThemeInfo(key: "Black", label: "🖤 Dark Studio", desc: "Sleek dark background with vibrant cyan typography", category: .featured),
+        ThemeInfo(key: "Editorial", label: "📄 Editorial Serif", desc: "Classic serif typography with warm paper tones", category: .featured),
+        ThemeInfo(key: "Minimalist", label: "🎨 Minimalist", desc: "Clean fine-line layout with subtle monochrome accents", category: .featured),
+        ThemeInfo(key: "White", label: "🤍 Standard White", desc: "Classic clean light presentation template", category: .featured),
+        
+        // Academic
+        ThemeInfo(key: "Academic Paper", label: "📜 Academic Monograph", desc: "Formal serif layout for scholarly lectures & research", category: .academic),
+        ThemeInfo(key: "Classic", label: "🎓 Classic Lecture", desc: "Traditional dark slate layout with gold accents", category: .academic),
+        ThemeInfo(key: "Chalkboard", label: "✏️ Studio Chalkboard", desc: "Textured dark chalkboard layout for active brainstorming", category: .academic),
+        ThemeInfo(key: "Technical Report", label: "🔬 Technical Report", desc: "Grid-focused layout for diagrams & data sets", category: .academic),
+        
+        // Portfolio
+        ThemeInfo(key: "Modern Portfolio", label: "📷 Modern Portfolio", desc: "High-contrast visual frames for artwork & design work", category: .portfolio),
+        ThemeInfo(key: "Photo Essay", label: "🖼 Photo Essay", desc: "Full-bleed layout for high-res imagery & media", category: .portfolio),
+        ThemeInfo(key: "Gallery Showcase", label: "🏛 Gallery Showcase", desc: "Clean museum wall aesthetic for exhibit presentations", category: .portfolio),
+        ThemeInfo(key: "Art Monograph", label: "🎨 Art Monograph", desc: "Minimalist layout with oversized typography for critiques", category: .portfolio),
+        
+        // Bold
+        ThemeInfo(key: "Bold", label: "⚡️ High Contrast Bold", desc: "Vibrant electric gradients for high engagement", category: .bold),
+        ThemeInfo(key: "Neon Cyber", label: "🟣 Neon Cyber", desc: "Deep dark canvas with electric magenta & violet accents", category: .bold),
+        ThemeInfo(key: "Vibrant Gradient", label: "🌈 Vibrant Gradient", desc: "Dynamic color shifts for speculative design talks", category: .bold),
+        ThemeInfo(key: "Typographic", label: "🔤 Typographic Hero", desc: "Oversized bold lettering for impactful statements", category: .bold),
+        
+        // Corporate
+        ThemeInfo(key: "Slate Executive", label: "🏢 Slate Executive", desc: "Refined slate blue palette for formal briefings", category: .corporate),
+        ThemeInfo(key: "Navy Grid", label: "⚓️ Navy Executive", desc: "Professional navy blue layout with crisp white typography", category: .corporate),
+        ThemeInfo(key: "Onyx Pro", label: "⚫️ Onyx Pro", desc: "Ultra-dark luxury aesthetic with silver lines", category: .corporate),
+        ThemeInfo(key: "Monochrome Minimal", label: "⚪️ Monochrome Grid", desc: "Strict black & white grid layout for structured agendas", category: .corporate)
     ]
     
+    var filteredThemes: [ThemeInfo] {
+        allThemes.filter { $0.category == selectedCategory }
+    }
+    
     var body: some View {
-        VStack(spacing: 18) {
+        VStack(spacing: 16) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Select Keynote Theme")
+                    Text("Keynote Theme & Template Gallery")
                         .font(.title3.bold())
-                    Text("Preview themes and select your Keynote presentation template.")
+                    Text("Select a theme category or enter your custom template name to preview.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -958,42 +1004,141 @@ struct KeynoteThemePickerSheet: View {
             
             Divider()
             
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    Text("Theme Presets Preview")
-                        .font(.caption.bold())
-                        .foregroundStyle(.secondary)
+            // Category Tabs
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(ThemeCategory.allCases) { category in
+                        Button {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                selectedCategory = category
+                                if category == .custom {
+                                    if customThemeName.isEmpty { customThemeName = "MyCustomTheme.kth" }
+                                }
+                            }
+                        } label: {
+                            Text(category.rawValue)
+                                .font(.subheadline.bold())
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(selectedCategory == category ? Color.purple : Color.primary.opacity(0.06), in: Capsule())
+                                .foregroundStyle(selectedCategory == category ? .white : .primary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 2)
+            }
+            
+            Divider()
+            
+            // Content Area
+            if selectedCategory == .custom || !customThemeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                // Live Real-Time Custom Template Preview Canvas
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("Custom / Premium Template Confirmation")
+                            .font(.caption.bold())
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        if !customThemeName.isEmpty {
+                            HStack(spacing: 4) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(.green)
+                                Text("Custom Theme Verified")
+                                    .font(.caption2.bold())
+                                    .foregroundStyle(.green)
+                            }
+                        }
+                    }
                     
+                    // 16:9 Dynamic Custom Theme Canvas
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 14)
+                            .fill(LinearGradient(colors: [Color(red: 0.1, green: 0.08, blue: 0.16), Color(red: 0.04, green: 0.04, blue: 0.08)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                        
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("CUSTOM KEYNOTE TEMPLATE")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 3)
+                                    .background(Color.yellow.opacity(0.25), in: Capsule())
+                                    .foregroundStyle(.yellow)
+                                
+                                Spacer()
+                                
+                                Text(customThemeName.isEmpty ? "Untitled.kth" : customThemeName)
+                                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                                    .foregroundStyle(.white.opacity(0.8))
+                            }
+                            
+                            Spacer()
+                            
+                            Text("Thinking With AI")
+                                .font(.system(size: 16, weight: .bold, design: .serif))
+                                .foregroundStyle(.white)
+                            
+                            Rectangle()
+                                .fill(LinearGradient(colors: [.yellow, .orange], startPoint: .leading, endPoint: .trailing))
+                                .frame(height: 2)
+                            
+                            Text("Real-time preview of '\(customThemeName.isEmpty ? "MyCustomTheme.kth" : customThemeName)' for Apple Keynote generation.")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.white.opacity(0.7))
+                                .lineLimit(2)
+                            
+                            Spacer()
+                        }
+                        .padding(16)
+                    }
+                    .frame(height: 160)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(Color.yellow.opacity(0.4), lineWidth: 1.5)
+                    )
+                    
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Template File / Name")
+                            .font(.caption2.bold())
+                            .foregroundStyle(.secondary)
+                        TextField("Type template name (e.g. Luxury Portfolio, Editorial Dark.kth)", text: $customThemeName)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                }
+                .padding(14)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                .frame(maxHeight: 340)
+            } else {
+                // Preset Theme Gallery Grid
+                ScrollView {
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
-                        ForEach(presets, id: \.0) { key, label, desc in
+                        ForEach(filteredThemes, id: \.key) { info in
                             ThemePreviewCard(
-                                key: key,
-                                label: label,
-                                desc: desc,
-                                isSelected: selectedTheme == key && customThemeName.isEmpty,
+                                key: info.key,
+                                label: info.label,
+                                desc: info.desc,
+                                isSelected: selectedTheme == info.key && customThemeName.isEmpty,
                                 action: {
-                                    selectedTheme = key
+                                    selectedTheme = info.key
                                     customThemeName = ""
                                 }
                             )
                         }
                     }
-                    
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Custom / Premium Theme Template Name")
-                            .font(.caption2.bold())
-                            .foregroundStyle(.secondary)
-                        TextField("e.g. MyCustomTheme.kth", text: $customThemeName)
-                            .textFieldStyle(.roundedBorder)
-                    }
-                    .padding(.top, 8)
+                    .padding(.vertical, 4)
                 }
+                .frame(maxHeight: 340)
             }
-            .frame(maxHeight: 380)
             
             Divider()
             
             HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    let activeName = customThemeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? selectedTheme : customThemeName.trimmingCharacters(in: .whitespacesAndNewlines)
+                    Text("Selected: \(activeName)")
+                        .font(.caption.bold())
+                        .foregroundStyle(.purple)
+                }
                 Spacer()
                 Button {
                     isGenerating = true
@@ -1015,7 +1160,7 @@ struct KeynoteThemePickerSheet: View {
             }
         }
         .padding(24)
-        .frame(width: 580, height: 550)
+        .frame(width: 620, height: 570)
     }
 }
 
@@ -1096,13 +1241,19 @@ struct ThemePreviewCard: View {
     @ViewBuilder
     private func slidePreviewBackground(for key: String) -> some View {
         switch key {
-        case "Black":
+        case "Black", "Onyx Pro":
             Color(red: 0.08, green: 0.08, blue: 0.11)
-        case "Editorial":
+        case "Editorial", "Academic Paper", "Art Monograph":
             Color(red: 0.97, green: 0.95, blue: 0.92)
-        case "Minimalist":
+        case "Minimalist", "Monochrome Minimal":
             Color.white
-        case "Bold":
+        case "Classic", "Slate Executive", "Navy Grid":
+            LinearGradient(colors: [Color(red: 0.08, green: 0.15, blue: 0.25), Color(red: 0.04, green: 0.08, blue: 0.15)], startPoint: .topLeading, endPoint: .bottomTrailing)
+        case "Chalkboard":
+            Color(red: 0.12, green: 0.18, blue: 0.15)
+        case "Modern Portfolio", "Photo Essay", "Gallery Showcase":
+            LinearGradient(colors: [Color(red: 0.15, green: 0.15, blue: 0.18), Color(red: 0.05, green: 0.05, blue: 0.08)], startPoint: .topLeading, endPoint: .bottomTrailing)
+        case "Bold", "Neon Cyber", "Vibrant Gradient", "Typographic":
             LinearGradient(colors: [Color(red: 0.20, green: 0.05, blue: 0.35), Color(red: 0.05, green: 0.10, blue: 0.35)], startPoint: .topLeading, endPoint: .bottomTrailing)
         default:
             Color(red: 0.96, green: 0.97, blue: 0.98)
@@ -1111,16 +1262,16 @@ struct ThemePreviewCard: View {
     
     private func primaryTextColor(for key: String) -> Color {
         switch key {
-        case "Black", "Bold": return .white
-        case "Editorial": return Color(red: 0.2, green: 0.18, blue: 0.15)
+        case "Black", "Bold", "Classic", "Slate Executive", "Navy Grid", "Onyx Pro", "Neon Cyber", "Vibrant Gradient", "Typographic", "Chalkboard", "Modern Portfolio", "Photo Essay", "Gallery Showcase": return .white
+        case "Editorial", "Academic Paper", "Art Monograph": return Color(red: 0.2, green: 0.18, blue: 0.15)
         default: return .black
         }
     }
     
     private func secondaryTextColor(for key: String) -> Color {
         switch key {
-        case "Black", "Bold": return .white.opacity(0.65)
-        case "Editorial": return Color(red: 0.45, green: 0.40, blue: 0.35)
+        case "Black", "Bold", "Classic", "Slate Executive", "Navy Grid", "Onyx Pro", "Neon Cyber", "Vibrant Gradient", "Typographic", "Chalkboard", "Modern Portfolio", "Photo Essay", "Gallery Showcase": return .white.opacity(0.65)
+        case "Editorial", "Academic Paper", "Art Monograph": return Color(red: 0.45, green: 0.40, blue: 0.35)
         default: return .secondary
         }
     }
@@ -1128,9 +1279,10 @@ struct ThemePreviewCard: View {
     private func badgeColor(for key: String) -> Color {
         switch key {
         case "Black": return .cyan.opacity(0.25)
-        case "Editorial": return Color.orange.opacity(0.2)
-        case "Minimalist": return Color.gray.opacity(0.2)
-        case "Bold": return Color.pink.opacity(0.3)
+        case "Editorial", "Academic Paper": return Color.orange.opacity(0.2)
+        case "Minimalist", "Monochrome Minimal": return Color.gray.opacity(0.2)
+        case "Bold", "Neon Cyber", "Vibrant Gradient": return Color.pink.opacity(0.3)
+        case "Classic", "Slate Executive", "Navy Grid": return Color.yellow.opacity(0.25)
         default: return Color.blue.opacity(0.2)
         }
     }
@@ -1138,9 +1290,10 @@ struct ThemePreviewCard: View {
     private func badgeTextColor(for key: String) -> Color {
         switch key {
         case "Black": return .cyan
-        case "Editorial": return Color.orange
-        case "Minimalist": return .primary
-        case "Bold": return .pink
+        case "Editorial", "Academic Paper": return Color.orange
+        case "Minimalist", "Monochrome Minimal": return .primary
+        case "Bold", "Neon Cyber", "Vibrant Gradient": return .pink
+        case "Classic", "Slate Executive", "Navy Grid": return .yellow
         default: return .blue
         }
     }
@@ -1148,18 +1301,19 @@ struct ThemePreviewCard: View {
     private func accentLineColor(for key: String) -> Color {
         switch key {
         case "Black": return .cyan
-        case "Editorial": return Color(red: 0.7, green: 0.4, blue: 0.3)
-        case "Minimalist": return .gray.opacity(0.3)
-        case "Bold": return .purple
+        case "Editorial", "Academic Paper": return Color(red: 0.7, green: 0.4, blue: 0.3)
+        case "Minimalist", "Monochrome Minimal": return .gray.opacity(0.3)
+        case "Bold", "Neon Cyber", "Vibrant Gradient": return .purple
+        case "Classic", "Slate Executive", "Navy Grid": return .yellow
         default: return .blue
         }
     }
     
     private func titleFont(for key: String) -> Font {
         switch key {
-        case "Editorial": return .system(size: 10, weight: .semibold, design: .serif)
-        case "Minimalist": return .system(size: 10, weight: .light, design: .monospaced)
-        case "Bold": return .system(size: 11, weight: .black, design: .default)
+        case "Editorial", "Academic Paper", "Art Monograph": return .system(size: 10, weight: .semibold, design: .serif)
+        case "Minimalist", "Monochrome Minimal", "Technical Report": return .system(size: 10, weight: .light, design: .monospaced)
+        case "Bold", "Neon Cyber", "Typographic": return .system(size: 11, weight: .black, design: .default)
         default: return .system(size: 10, weight: .bold, design: .default)
         }
     }
