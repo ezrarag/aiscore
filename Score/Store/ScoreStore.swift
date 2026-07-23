@@ -872,10 +872,9 @@ final class ScoreStore {
                 let savedSlides = KeynoteSyncService.shared.pullSlidesFromKeynote()
                 if !savedSlides.isEmpty { applyKeynoteSlides(savedSlides) }
             }
-            startKeynoteLiveSync()
             self.errorMessage = KeynoteSyncService.shared.didOpenExistingDocument
-                ? "✅ Saved Keynote presentation reopened. Live sync is on."
-                : "✅ Presentation created and saved as a Keynote file. Live sync is on."
+                ? "✅ Saved Keynote presentation reopened!"
+                : "✅ Presentation created in Apple Keynote!"
         } else {
             self.errorMessage = "⚠️ \(KeynoteSyncService.shared.lastError ?? "Keynote automation failed.")"
         }
@@ -896,20 +895,8 @@ final class ScoreStore {
         errorMessage = "✅ Score and the Keynote file are saved."
     }
 
-    @MainActor
     func startKeynoteLiveSync() {
-        keynoteSyncTask?.cancel()
-        isKeynoteLiveSyncEnabled = true
-        lastAppDeckFingerprint = activeScore.map(deckFingerprint)
-        let keynoteSlides = KeynoteSyncService.shared.pullSlidesFromKeynote()
-        lastKeynoteDeckFingerprint = keynoteSlides.isEmpty ? nil : keynoteFingerprint(keynoteSlides)
-        keynoteSyncTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(2))
-                guard !Task.isCancelled, let self else { break }
-                self.performKeynoteLiveSync()
-            }
-        }
+        stopKeynoteLiveSync()
     }
 
     @MainActor
@@ -923,24 +910,8 @@ final class ScoreStore {
 
     @MainActor
     private func performKeynoteLiveSync() {
-        guard isKeynoteLiveSyncEnabled, let score = activeScore else { return }
-        let keynoteSlides = KeynoteSyncService.shared.pullSlidesFromKeynote()
-        guard !keynoteSlides.isEmpty else {
-            stopKeynoteLiveSync()
-            errorMessage = "Keynote live sync stopped because the presentation was closed."
-            return
-        }
-        KeynoteSyncService.shared.captureFrontDocumentLocation(for: score.id)
-
-        let keynoteDeckFingerprint = keynoteFingerprint(keynoteSlides)
-        let keynoteChanged = lastKeynoteDeckFingerprint.map { $0 != keynoteDeckFingerprint } ?? false
-
-        if keynoteChanged {
-            // Pull edits silently from Keynote into Score without hijacking Keynote GUI focus
-            applyKeynoteSlides(keynoteSlides)
-            lastAppDeckFingerprint = activeScore.map(deckFingerprint)
-            lastKeynoteDeckFingerprint = keynoteDeckFingerprint
-        }
+        // Disabled background polling timer to prevent Keynote GUI focus jumping.
+        // Use 'Sync from Keynote' or 'Save Keynote File' for on-demand 1-click sync.
     }
 
     private var activeScore: StudioScore? {
