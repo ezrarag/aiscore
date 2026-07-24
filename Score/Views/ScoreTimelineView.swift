@@ -89,6 +89,16 @@ struct ScoreTimelineView: View {
                                 store.pullFromKeynote()
                             }
                             Divider()
+                            Button("⚡️ Auto-Style Deck Layouts in Keynote", systemImage: "wand.and.stars") {
+                                store.autoStyleActiveDeckInKeynote()
+                            }
+                            Button("☀️ Swap Theme to Light (Editorial / White)", systemImage: "sun.max") {
+                                store.switchKeynoteTheme(themeName: "Basic White")
+                            }
+                            Button("🌙 Swap Theme to Dark (Basic Black)", systemImage: "moon") {
+                                store.switchKeynoteTheme(themeName: "Basic Black")
+                            }
+                            Divider()
                             Button("Choose Keynote Theme…", systemImage: "paintbrush") {
                                 showKeynoteThemePicker = true
                             }

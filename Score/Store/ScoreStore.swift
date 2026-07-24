@@ -894,6 +894,25 @@ final class ScoreStore {
         lastKeynoteDeckFingerprint = keynoteFingerprint(slides)
         errorMessage = "✅ Score and the Keynote file are saved."
     }
+    
+    @MainActor
+    func autoStyleActiveDeckInKeynote() {
+        guard let score = activeScore else { return }
+        if KeynoteSyncService.shared.autoStyleKeynoteLayouts(score: score) {
+            errorMessage = "✨ Keynote slides auto-styled with master layout variations!"
+        } else {
+            errorMessage = "⚠️ Could not auto-style Keynote deck. Open Keynote first."
+        }
+    }
+    
+    @MainActor
+    func switchKeynoteTheme(themeName: String) {
+        if KeynoteSyncService.shared.changeKeynoteTheme(themeName: themeName) {
+            errorMessage = "🎨 Keynote theme changed to '\(themeName)'!"
+        } else {
+            errorMessage = "⚠️ Could not change Keynote theme. Open Keynote first."
+        }
+    }
 
     func startKeynoteLiveSync() {
         stopKeynoteLiveSync()
@@ -1899,6 +1918,78 @@ final class KeynoteSyncService: ObservableObject {
             }
         }
         lastError = nil
+        return true
+        #else
+        return false
+        #endif
+    }
+
+    func changeKeynoteTheme(themeName: String) -> Bool {
+        #if os(macOS)
+        let cleanTheme = themeName.replacingOccurrences(of: "\"", with: "")
+        let script = """
+        tell application id "\(keynoteBundleID)"
+            if (count of documents) > 0 then
+                tell front document
+                    try
+                        set document theme to theme "\(cleanTheme)"
+                    on error
+                        try
+                            set document theme to theme "Basic White"
+                        end try
+                    end try
+                end tell
+                return true
+            end if
+            return false
+        end tell
+        """
+        return executeAppleScript(script)
+        #else
+        return false
+        #endif
+    }
+    
+    func autoStyleKeynoteLayouts(score: StudioScore) -> Bool {
+        #if os(macOS)
+        let slides = score.blocks.flatMap(\.slides)
+        guard !slides.isEmpty else { return false }
+        
+        for (idx, slide) in slides.enumerated() {
+            var selectedLayout = "Title & Subtitle"
+            if idx == 0 {
+                selectedLayout = "Title & Subtitle"
+            } else if slide.liveQuestion != nil || slide.title.contains("?") {
+                selectedLayout = "Quote"
+            } else if slide.bodyText.contains("\n") || slide.bodyText.contains("-") || slide.bodyText.contains("•") {
+                selectedLayout = "2 Columns"
+            } else if idx % 3 == 0 {
+                selectedLayout = "Headline - Left"
+            } else if idx % 2 == 0 {
+                selectedLayout = "Title, Bullets & Photo"
+            } else {
+                selectedLayout = "Title - Top"
+            }
+            
+            let script = """
+            tell application id "\(keynoteBundleID)"
+                if (count of documents) > 0 then
+                    tell front document
+                        if (count of slides) >= \(idx + 1) then
+                            tell slide \(idx + 1)
+                                try
+                                    set base layout to slide layout "\(selectedLayout)" of master theme
+                                end try
+                            end tell
+                        end if
+                    end tell
+                    return true
+                end if
+                return false
+            end tell
+            """
+            _ = executeAppleScript(script)
+        }
         return true
         #else
         return false
